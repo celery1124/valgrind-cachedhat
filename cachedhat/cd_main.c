@@ -2689,7 +2689,7 @@ static void write_APInfos(void)
       FP(" [\n");
    }
 
-   FP("]\n");
+   FP(" ]\n");
 }
 
 
@@ -2701,7 +2701,7 @@ static void write_AP_Hist(APInfo* api, Bool is_first)
    FHH("fs: ");
    Bool is_first_frame = True;
    VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
-   FHH(" ]\n");
+   FHH("]\n");
 
    Hist* hist_node = api->histHead->next; // dummy head for api
    
