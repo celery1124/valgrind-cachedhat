@@ -60,6 +60,8 @@
 //------------------------------------------------------------//
 
 #define HISTOGRAM_SIZE_LIMIT 1024
+UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
+UInt  clo_mem_res = MEM_RES;/* mem space resolution */
 // Values for the entire run.
 static ULong g_total_blocks = 0;
 static ULong g_total_bytes  = 0;
@@ -245,7 +247,7 @@ static void check_for_peak(void)
 
 void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
    (*head) = VG_(malloc)("dh.new_block.3", sizeof(Hist));
-   (*head)->mem_region_size = (req_szB/MEM_RES + 1);
+   (*head)->mem_region_size = (req_szB/clo_mem_res + 1);
    if (req_szB == 0) (*head)->mem_region = NULL; // dummy node
    else {
       (*head)->mem_region = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
@@ -263,6 +265,7 @@ void add_hist_node(Hist** node) {
    VG_(memset)(new_node->mem_region, 0, new_node->mem_region_size * sizeof(UInt));
    new_node->next = NULL;
    new_node->ts = 0;
+   (*node)->next = new_node;
    (*node) = new_node;
 }
 
@@ -459,8 +462,10 @@ static void retire_Block ( Block* bk, Bool because_freed )
    }
 
    // Heap hist list
-   if(bk->histHead != NULL) move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
-   //VG_(printf)("api histHead %p, api histNode %p\n", api->histHead, api->histNode);
+   if(bk->histHead != NULL) {
+      move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
+      //VG_(printf)("api histHead %p, bk head %p, bk end %p\n", api->histHead, bk->histHead, bk->histNode);
+   }
 
 #if 0
    if (bk->histoB) {
@@ -866,6 +871,7 @@ void dh_handle_noninsn_write ( CorePart part, ThreadId tid,
 
 static Bool  clo_cache_sim  = True;  /* do cache simulation? */
 static Bool  clo_branch_sim = False; /* do branch simulation? */
+
 static const HChar* clo_cachegrind_out_file = "cachegrind.out.%p";
 
 /*------------------------------------------------------------*/
@@ -2702,6 +2708,7 @@ static void write_AP_Hist(APInfo* api, Bool is_first)
    while(hist_node != NULL) {
       for (UInt i = 0; i < hist_node->mem_region_size; i++) FHH("%d\t", hist_node->mem_region[i]);
       FHH("\n");
+      //VG_(printf)("print head %p, hist_node %p\n", api->histHead, hist_node);
       hist_node = hist_node->next;
    }
 
@@ -3052,6 +3059,8 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_STR_CLO( arg, "--cachegrind-out-file", clo_cachegrind_out_file) {}
    else if VG_BOOL_CLO(arg, "--cache-sim",  clo_cache_sim)  {}
    else if VG_BOOL_CLO(arg, "--branch-sim", clo_branch_sim) {}
+   else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
+   else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
    else
       return False;
 
