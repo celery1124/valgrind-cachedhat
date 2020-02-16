@@ -4695,6 +4695,8 @@ AC_CONFIG_FILES([
    cachegrind/cg_annotate
    cachegrind/cg_diff
    cachedhat/Makefile
+   cachedhat/tests/Makefile
+   cachedhat/tests/x86/Makefile
    cachedhat/cd_annotate
    cachedhat/cd_diff
    callgrind/Makefile
