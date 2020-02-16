@@ -211,6 +211,9 @@ typedef
       enum { Unknown=999, Exactly, Mixed } xsize_tag;
       SizeT xsize;
       UInt* histo; /* [0 .. xsize-1] */
+      
+      Hist*       histHead;
+      Hist*       histNode;
    }
    APInfo;
 
@@ -238,6 +241,46 @@ static void check_for_peak(void)
       VG_(doneIterFM)(apinfo);
    }
 }
+
+
+void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
+   (*head) = VG_(malloc)("dh.new_block.3", sizeof(Hist));
+   (*head)->mem_region_size = (req_szB/MEM_RES + 1);
+   (*head)->mem_region = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
+   VG_(memset)((*head)->mem_region, 0, (*head)->mem_region_size * sizeof(UInt));
+   (*head)->next = NULL;
+   (*head)->ts = 0;
+   *node = (*head);
+}
+
+void add_hist_node(Hist** node) {
+   Hist* new_node = VG_(malloc)("dh.new_block.3", sizeof(Hist));
+   new_node->mem_region_size = (*node)->mem_region_size;
+   new_node->mem_region = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
+   VG_(memset)(new_node->mem_region, 0, new_node->mem_region_size * sizeof(UInt));
+   new_node->next = NULL;
+   new_node->ts = 0;
+   (*node) = new_node;
+}
+
+void del_hist_list(Hist* head) {
+   Hist* next = head->next;
+   while (next != NULL) {
+      next = head->next;
+      VG_(free)(head->mem_region);
+      VG_(free)(head);
+      head = next;
+   }
+}
+
+void move_hist_list(Hist** curr, Hist* new_head, Hist* new_curr) {
+   tl_assert((*curr)->next == NULL);
+   if (new_head != NULL) {
+      (*curr)->next = new_head;
+      (*curr) = new_curr;
+   }
+}
+
 
 /* 'bk' is being introduced (has just been allocated).  Find the
    relevant APInfo entry for it, or create one, based on the block's
@@ -268,6 +311,9 @@ static void intro_Block ( Block* bk )
       api->xsize_tag = Unknown;
       api->xsize = 0;
       if (0) VG_(printf)("api %p   -->  Unknown\n", api);
+      // heap histogram
+      api->histHead = NULL; api->histNode = NULL;
+      init_hist_node(&(api->histHead), &(api->histNode), bk->req_szB);
    }
 
    tl_assert(api->ap == bk->ap);
@@ -409,6 +455,10 @@ static void retire_Block ( Block* bk, Bool because_freed )
       if (0) VG_(printf)("fold in, AP = %p\n", api);
    }
 
+   // Heap hist list
+   move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
+   //VG_(printf)("api histHead %p, api histNode %p\n", api->histHead, api->histNode);
+
 #if 0
    if (bk->histoB) {
       VG_(printf)("block retiring, histo %lu: ", bk->req_szB);
@@ -523,6 +573,12 @@ void* new_block ( ThreadId tid, void* p, SizeT req_szB, SizeT req_alignB,
    if (req_szB <= HISTOGRAM_SIZE_LIMIT) {
       bk->histoW = VG_(malloc)("dh.new_block.2", req_szB * sizeof(UShort));
       VG_(memset)(bk->histoW, 0, req_szB * sizeof(UShort));
+   }
+
+   // set up heap histogram
+   bk->histHead = NULL; bk->histNode = NULL;
+   if (req_szB >= HISTOGRAM_SIZE_LOW) {
+      init_hist_node(&(bk->histHead), &(bk->histNode), req_szB);
    }
 
    Bool present = VG_(addToFM)( interval_tree, (UWord)bk, (UWord)0/*no val*/);
@@ -2379,9 +2435,11 @@ static UInt ULong_width(ULong n)
    return w + (w-1)/3;   // add space for commas
 }
 
-static VgFile* fp_malloc;
+static VgFile* fp_heap;
+static VgFile* fp_heap_hist;
 
-#define FP(format, args...) ({ VG_(fprintf)(fp_malloc, format, ##args); })
+#define FP(format, args...) ({ VG_(fprintf)(fp_heap, format, ##args); })
+#define FHH(format, args...) ({ VG_(fprintf)(fp_heap_hist, format, ##args); })
 
 // The frame table holds unique frames.
 static WordFM* frame_tbl = NULL;
@@ -2502,6 +2560,46 @@ static void write_APInfo_frame(UInt n, DiEpoch ep, Addr ip, void* opaque)
    VG_(delete_IIPC)(iipc);
 };
 
+static void write_APInfo_frame2(UInt n, DiEpoch ep, Addr ip, void* opaque)
+{
+   Bool* is_first = (Bool*)opaque;
+   InlIPCursor* iipc = VG_(new_IIPC)(ep, ip);
+
+   do {
+      const HChar* buf = VG_(describe_IP)(ep, ip, iipc);
+
+      // Skip entries in vg_replace_malloc.c (e.g. `malloc`, `calloc`,
+      // `realloc`, `operator new`) because they're boring and clog up the
+      // output.
+      if (VG_(strstr)(buf, "vg_replace_malloc.c")) {
+         continue;
+      }
+
+      // If this description has been seen before, get its number. Otherwise,
+      // give it a new number and put it in the table.
+      UWord keyW = 0, valW = 0;
+      UWord frame_n = 0;
+      Bool found = VG_(lookupFM)(frame_tbl, &keyW, &valW, (UWord)buf);
+      if (found) {
+         //const HChar* str = (const HChar*)keyW;
+         //tl_assert(0 == VG_(strcmp)(buf, str));
+         frame_n = valW;
+      } else {
+         // `buf` is a static buffer, we must copy it.
+         const HChar* str = VG_(strdup)("dh.frame_tbl.3", buf);
+         frame_n = next_frame_n++;
+         Bool present = VG_(addToFM)(frame_tbl, (UWord)str, frame_n);
+         tl_assert(!present);
+      }
+
+      FHH("%c%lu", *is_first ? '[' : ',', frame_n);
+      *is_first = False;
+
+   } while (VG_(next_IIPC)(iipc));
+
+   VG_(delete_IIPC)(iipc);
+};
+
 static void write_APInfo(APInfo* api, Bool is_first)
 {
    tl_assert(api->total_blocks >= api->max_blocks);
@@ -2583,6 +2681,47 @@ static void write_APInfos(void)
    }
 
    FP(" ]\n");
+}
+
+
+static void write_AP_Hist(APInfo* api, Bool is_first)
+{
+   tl_assert(api->total_blocks >= api->max_blocks);
+   tl_assert(api->total_bytes >= api->max_bytes);
+
+   FHH("fs: ");
+   Bool is_first_frame = True;
+   VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
+   FHH("]\n");
+
+   Hist* hist_node = api->histHead;
+   
+   while(hist_node != NULL) {
+      for (UInt i = 0; i < hist_node->mem_region_size; i++) FHH("%d\t", hist_node->mem_region[i]);
+      FHH("\n");
+      hist_node = hist_node->next;
+   }
+
+   FHH("\n\n");
+}
+
+static void write_AP_Hists(void)
+{
+   UWord keyW, valW;
+
+   VG_(initIterFM)(apinfo);
+   Bool is_first = True;
+   while (VG_(nextIterFM)(apinfo, &keyW, &valW)) {
+      APInfo* api = (APInfo*)valW;
+      tl_assert(api && api->ap == (ExeContext*)keyW);
+      if(api->histHead != api->histNode) {
+         write_AP_Hist(api, is_first);
+         is_first = False;
+      }
+   }
+   VG_(doneIterFM)(apinfo);
+
+   FHH(" \n");
 }
 
 static void cd_fini(Int exitcode)
@@ -2736,6 +2875,7 @@ static void cd_fini(Int exitcode)
 
    // Malloc profile print
    const HChar* clo_dhat_out_file = "heapProfile.out.%p";
+   const HChar* clo_hist_out_file = "heapProfileHist.out.%p";
 
    // Total bytes might be at a possible peak.
    check_for_peak();
@@ -2780,11 +2920,20 @@ static void cd_fini(Int exitcode)
    // 3.3.0.
    HChar* dhat_out_file =
       VG_(expand_file_name)("--dhat-out-file", clo_dhat_out_file);
+   HChar* dhat_hist_out_file =
+      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file);
 
-   fp_malloc = VG_(fopen)(dhat_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+   fp_heap = VG_(fopen)(dhat_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
                    VKI_S_IRUSR|VKI_S_IWUSR);
-   if (!fp_malloc) {
+   if (!fp_heap) {
       VG_(umsg)("error: can't open DHAT output file '%s'\n", dhat_out_file);
+      return;
+   }
+
+   fp_heap_hist = VG_(fopen)(dhat_hist_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+                   VKI_S_IRUSR|VKI_S_IWUSR);
+   if (!fp_heap_hist) {
+      VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file);
       return;
    }
 
@@ -2808,6 +2957,9 @@ static void cd_fini(Int exitcode)
 
    // APs.
    write_APInfos();
+
+   // Heap histograms
+   write_AP_Hists();
 
    // Frame table.
    FP(",\"ftbl\":\n");
@@ -2833,8 +2985,11 @@ static void cd_fini(Int exitcode)
 
    FP("}\n");
 
-   VG_(fclose)(fp_malloc);
-   fp_malloc = NULL;
+   VG_(fclose)(fp_heap);
+   fp_heap = NULL;
+
+   VG_(fclose)(fp_heap_hist);
+   fp_heap_hist = NULL;
 
    if (VG_(clo_verbosity) == 0) {
       return;
