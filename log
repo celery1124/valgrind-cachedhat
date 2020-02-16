@@ -1,0 +1,85 @@
+In file included from cg_sim.c:40:0,
+                 from cg_main.c:51:
+cg_malloc.h:25:13: warning: no previous prototype for ‘malloc_handle_write’ [-Wmissing-prototypes]
+ inline void malloc_handle_write ( Addr addr, UWord szB )
+             ^
+cg_malloc.h: In function ‘malloc_handle_write’:
+cg_malloc.h:31:10: warning: implicit declaration of function ‘inc_histo_for_block’ [-Wimplicit-function-declaration]
+          inc_histo_for_block(bk, addr, szB);
+          ^
+cg_malloc.h: At top level:
+cg_malloc.h:35:13: warning: no previous prototype for ‘malloc_handle_read’ [-Wmissing-prototypes]
+ inline void malloc_handle_read ( Addr addr, UWord szB )
+             ^
+cg_main.c:719:6: warning: conflicting types for ‘inc_histo_for_block’ [enabled by default]
+ void inc_histo_for_block ( Block* bk, Addr addr, UWord szB )
+      ^
+cg_main.c:719:6: error: static declaration of ‘inc_histo_for_block’ follows non-static declaration
+In file included from cg_sim.c:40:0,
+                 from cg_main.c:51:
+cg_malloc.h:31:10: note: previous implicit declaration of ‘inc_histo_for_block’ was here
+          inc_histo_for_block(bk, addr, szB);
+          ^
+cg_main.c: In function ‘addMemEvent’:
+cg_main.c:1827:4: warning: implicit declaration of function ‘assign’ [-Wimplicit-function-declaration]
+    addStmtToIRSB( sbOut, assign(sp, IRExpr_Get(goff_sp, tyAddr)));
+    ^
+cg_main.c:1827:4: warning: passing argument 2 of ‘addStmtToIRSB’ makes pointer from integer without a cast [enabled by default]
+In file included from ../VEX/pub/libvex.h:41:0,
+                 from ../include/pub_tool_options.h:35,
+                 from cg_main.c:40:
+../VEX/pub/libvex_ir.h:3165:13: note: expected ‘struct IRStmt *’ but argument is of type ‘int’
+ extern void addStmtToIRSB ( IRSB*, IRStmt* );
+             ^
+cg_main.c:1834:17: warning: implicit declaration of function ‘binop’ [-Wimplicit-function-declaration]
+                 ? binop(Iop_Sub32, mkexpr(sp), mkU32(rz_szB))
+                 ^
+cg_main.c:1834:17: warning: implicit declaration of function ‘mkexpr’ [-Wimplicit-function-declaration]
+cg_main.c:1834:17: warning: implicit declaration of function ‘mkU32’ [-Wimplicit-function-declaration]
+cg_main.c:1835:17: warning: implicit declaration of function ‘mkU64’ [-Wimplicit-function-declaration]
+                 : binop(Iop_Sub64, mkexpr(sp), mkU64(rz_szB)))
+                 ^
+cg_main.c:1836:4: warning: passing argument 2 of ‘addStmtToIRSB’ makes pointer from integer without a cast [enabled by default]
+    );
+    ^
+In file included from ../VEX/pub/libvex.h:41:0,
+                 from ../include/pub_tool_options.h:35,
+                 from cg_main.c:40:
+../VEX/pub/libvex_ir.h:3165:13: note: expected ‘struct IRStmt *’ but argument is of type ‘int’
+ extern void addStmtToIRSB ( IRSB*, IRStmt* );
+             ^
+cg_main.c:1845:4: warning: passing argument 2 of ‘addStmtToIRSB’ makes pointer from integer without a cast [enabled by default]
+    );
+    ^
+In file included from ../VEX/pub/libvex.h:41:0,
+                 from ../include/pub_tool_options.h:35,
+                 from cg_main.c:40:
+../VEX/pub/libvex_ir.h:3165:13: note: expected ‘struct IRStmt *’ but argument is of type ‘int’
+ extern void addStmtToIRSB ( IRSB*, IRStmt* );
+             ^
+cg_main.c:1854:4: warning: passing argument 2 of ‘addStmtToIRSB’ makes pointer from integer without a cast [enabled by default]
+    );
+    ^
+In file included from ../VEX/pub/libvex.h:41:0,
+                 from ../include/pub_tool_options.h:35,
+                 from cg_main.c:40:
+../VEX/pub/libvex_ir.h:3165:13: note: expected ‘struct IRStmt *’ but argument is of type ‘int’
+ extern void addStmtToIRSB ( IRSB*, IRStmt* );
+             ^
+cg_main.c:1855:14: warning: assignment makes pointer from integer without a cast [enabled by default]
+    di->guard = mkexpr(guard);
+              ^
+cg_main.c: At top level:
+cg_main.c:764:6: warning: ‘dh_handle_noninsn_read’ defined but not used [-Wunused-function]
+ void dh_handle_noninsn_read ( CorePart part, ThreadId tid, const HChar* s,
+      ^
+cg_main.c:781:6: warning: ‘dh_handle_noninsn_write’ defined but not used [-Wunused-function]
+ void dh_handle_noninsn_write ( CorePart part, ThreadId tid,
+      ^
+cg_main.c:1788:6: warning: ‘addMemEvent’ defined but not used [-Wunused-function]
+ void addMemEvent(IRSB* sbOut, Bool isWrite, Int szB, IRExpr* addr,
+      ^
+make[3]: *** [cachegrind_amd64_linux-cg_main.o] Error 1
+make[2]: *** [all-recursive] Error 1
+make[1]: *** [all-recursive] Error 1
+make: *** [all] Error 2
