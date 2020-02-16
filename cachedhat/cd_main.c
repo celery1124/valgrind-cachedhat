@@ -246,8 +246,11 @@ static void check_for_peak(void)
 void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
    (*head) = VG_(malloc)("dh.new_block.3", sizeof(Hist));
    (*head)->mem_region_size = (req_szB/MEM_RES + 1);
-   (*head)->mem_region = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
-   VG_(memset)((*head)->mem_region, 0, (*head)->mem_region_size * sizeof(UInt));
+   if (req_szB == 0) (*head)->mem_region = NULL; // dummy node
+   else {
+      (*head)->mem_region = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
+      VG_(memset)((*head)->mem_region, 0, (*head)->mem_region_size * sizeof(UInt));
+   }
    (*head)->next = NULL;
    (*head)->ts = 0;
    *node = (*head);
@@ -313,7 +316,7 @@ static void intro_Block ( Block* bk )
       if (0) VG_(printf)("api %p   -->  Unknown\n", api);
       // heap histogram
       api->histHead = NULL; api->histNode = NULL;
-      init_hist_node(&(api->histHead), &(api->histNode), bk->req_szB);
+      init_hist_node(&(api->histHead), &(api->histNode), 0);
    }
 
    tl_assert(api->ap == bk->ap);
@@ -456,7 +459,7 @@ static void retire_Block ( Block* bk, Bool because_freed )
    }
 
    // Heap hist list
-   move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
+   if(bk->histHead != NULL) move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
    //VG_(printf)("api histHead %p, api histNode %p\n", api->histHead, api->histNode);
 
 #if 0
@@ -2680,7 +2683,7 @@ static void write_APInfos(void)
       FP(" [\n");
    }
 
-   FP(" ]\n");
+   FP("]\n");
 }
 
 
@@ -2692,9 +2695,9 @@ static void write_AP_Hist(APInfo* api, Bool is_first)
    FHH("fs: ");
    Bool is_first_frame = True;
    VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
-   FHH("]\n");
+   FHH(" ]\n");
 
-   Hist* hist_node = api->histHead;
+   Hist* hist_node = api->histHead->next; // dummy head for api
    
    while(hist_node != NULL) {
       for (UInt i = 0; i < hist_node->mem_region_size; i++) FHH("%d\t", hist_node->mem_region[i]);
