@@ -212,8 +212,8 @@ void cachesim_D1_doref(Addr a, UChar size, ULong* m1, ULong *mL, UChar rw) // r-
       (*m1)++;
       if (cachesim_ref_is_miss(&LL, a, size)) {
          (*mL)++;
-         if (rw == 0) malloc_handle_read(a, size);
-         else malloc_handle_write(a, size);
+         if (rw == 0) malloc_handle_read(a, LL.line_size);
+         else malloc_handle_write(a, LL.line_size);
       }
    }
 }
