@@ -41,15 +41,15 @@ def main():
             else:
                 col = (line.strip('\t\n').replace("\t"," "))
                 col = list(map(int, col.split()))
-                col = np.array(col)
+                col = np.ndarray((1,len(col)), buffer=np.array(col))
                 if mat == None:
                     mat = col
                 else:
-                    if col.shape[0]> mat.shape[1]:
-                        zero_mat = np.zeros((mat.shape[0], len(col)-mat.shape[1]))
+                    if col.shape[1]> mat.shape[1]:
+                        zero_mat = np.zeros((mat.shape[0], col.shape[1]-mat.shape[1]))
                         mat = np.concatenate([mat, zero_mat], axis=1)
-                    elif col.shape[0] < mat.shape[1]:
-                        col = np.concatenate([col, np.zeros(mat.shape[1] - col.shape[0])])
+                    elif col.shape[1] < mat.shape[1]:
+                        col = np.concatenate([col, np.zeros(mat.shape[1] - col.shape[1])])
                     else:
                         pass
                     mat = np.vstack([mat, col])
