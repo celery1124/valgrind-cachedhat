@@ -2,6 +2,7 @@
 
 import sys
 import os
+import errno
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -12,7 +13,12 @@ def main():
         exit()
     filename = sys.argv[1]
     outFolder = sys.argv[2]
-    os.mkdir(outFolder)
+    try:
+        os.mkdir(outFolder)
+    except OSError as exc:
+        if exc.errno != errno.EEXIST:
+            raise
+        pass
 
     mat = None
     mat_name = None
@@ -35,10 +41,18 @@ def main():
             else:
                 col = (line.strip('\t\n').replace("\t"," "))
                 col = list(map(int, col.split()))
+                col = np.array(col)
                 if mat == None:
-                    mat = np.array(col)
+                    mat = col
                 else:
-                    mat = np.vstack([mat, np.array(col)])
+                    if col.shape[0]> mat.shape[1]:
+                        zero_mat = np.zeros((mat.shape[0], len(col)-mat.shape[1]))
+                        mat = np.concatenate([mat, zero_mat], axis=1)
+                    elif col.shape[0] < mat.shape[1]:
+                        col = np.concatenate([col, np.zeros(mat.shape[1] - col.shape[0])])
+                    else:
+                        pass
+                    mat = np.vstack([mat, col])
             line = fp.readline()
             cnt += 1
     # plot heatmap
