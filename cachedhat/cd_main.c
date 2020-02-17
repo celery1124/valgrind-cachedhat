@@ -631,9 +631,6 @@ void die_block ( void* p, Bool custom_free )
       VG_(free)( bk->histoW );
       bk->histoW = NULL;
    }
-   if (bk->histHead) {
-      del_hist_list(bk->histHead);
-   }
    VG_(free)( bk );
 }
 
