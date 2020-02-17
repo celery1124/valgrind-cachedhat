@@ -258,9 +258,9 @@ void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
    *node = (*head);
 }
 
-void add_hist_node(Hist** node) {
+void add_hist_node(Hist** node, UInt size) {
    Hist* new_node = VG_(malloc)("dh.new_block.3", sizeof(Hist));
-   new_node->mem_region_size = (*node)->mem_region_size;
+   new_node->mem_region_size = size;
    new_node->mem_region = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
    VG_(memset)(new_node->mem_region, 0, new_node->mem_region_size * sizeof(UInt));
    new_node->next = NULL;
@@ -631,6 +631,9 @@ void die_block ( void* p, Bool custom_free )
       VG_(free)( bk->histoW );
       bk->histoW = NULL;
    }
+   if (bk->histHead) {
+      del_hist_list(bk->histHead);
+   }
    VG_(free)( bk );
 }
 
@@ -698,6 +701,7 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
       resize_Block(bk->ap, bk->req_szB, new_req_szB);
       bk->payload = (Addr)p_new;
       bk->req_szB = new_req_szB;
+      add_hist_node(&(bk->histNode), (new_req_szB/clo_mem_res + 1));
 
       // and re-add
       Bool present
@@ -2731,7 +2735,7 @@ static void write_AP_Hists(void)
    }
    VG_(doneIterFM)(apinfo);
 
-   FHH(" \n");
+   FHH("\n");
 }
 
 static void cd_fini(Int exitcode)

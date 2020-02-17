@@ -34,7 +34,7 @@ typedef
 // export function
 extern UInt clo_ts_res;
 extern Block* find_Block_containing ( Addr a );
-extern void add_hist_node(Hist** node);
+extern void add_hist_node(Hist** node, UInt size);
 
 inline void malloc_handle_write ( Addr addr, UWord szB )
 {
@@ -43,7 +43,7 @@ inline void malloc_handle_write ( Addr addr, UWord szB )
       bk->writes_bytes += szB;
       if(bk->histHead) {
          bk->histNode->mem_region[(addr-bk->payload)/MEM_RES]++;
-         if(++(bk->histNode->ts) == clo_ts_res) add_hist_node(&(bk->histNode));
+         if(++(bk->histNode->ts) == clo_ts_res) add_hist_node(&(bk->histNode), bk->histNode->mem_region_size);
          //VG_(printf)("node %p, ts %d\n", bk->histNode, bk->histNode->ts);
       }
    }
