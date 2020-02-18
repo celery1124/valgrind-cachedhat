@@ -259,6 +259,7 @@ void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
 }
 
 void add_hist_node(Hist** node, UInt size) {
+   tl_assert((*node) != NULL);
    Hist* new_node = VG_(malloc)("dh.new_block.3", sizeof(Hist));
    new_node->mem_region_size = size;
    new_node->mem_region = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
@@ -698,7 +699,10 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
       resize_Block(bk->ap, bk->req_szB, new_req_szB);
       bk->payload = (Addr)p_new;
       bk->req_szB = new_req_szB;
-      add_hist_node(&(bk->histNode), (new_req_szB/clo_mem_res + 1));
+      if (bk->histNode == NULL) { // in case realloc is called before Hist node is allocated
+         init_hist_node(&(bk->histHead), &(bk->histNode), new_req_szB);
+      }
+      else add_hist_node(&(bk->histNode), (new_req_szB/clo_mem_res + 1));
 
       // and re-add
       Bool present
