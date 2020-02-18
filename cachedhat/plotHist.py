@@ -49,12 +49,16 @@ def main():
                         zero_mat = np.zeros((mat.shape[0], col.shape[1]-mat.shape[1]))
                         mat = np.concatenate([mat, zero_mat], axis=1)
                     elif col.shape[1] < mat.shape[1]:
-                        col = np.concatenate([col, np.zeros(mat.shape[1] - col.shape[1])])
+                        pad_zeros = np.zeros(mat.shape[1] - col.shape[1])
+                        pad_zeros = np.ndarray((1,len(pad_zeros)), buffer=pad_zeros)
+                        col = np.concatenate([col, pad_zeros], axis=1)
                     else:
                         pass
                     mat = np.vstack([mat, col])
             line = fp.readline()
             cnt += 1
+            if cnt % 1e4 == 0:
+                print('[%d] 10k line pass\n' % (cnt/1e4))
     # plot heatmap
     # a = np.random.random((16, 16))
     # print(type(a))
