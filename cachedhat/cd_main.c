@@ -2724,6 +2724,9 @@ static void write_AP_Hists(void)
 {
    UWord keyW, valW;
 
+   FHH("ts-res: %d\n", clo_ts_res);
+   FHH("mem-res: %d\n", clo_mem_res);
+
    VG_(initIterFM)(apinfo);
    Bool is_first = True;
    while (VG_(nextIterFM)(apinfo, &keyW, &valW)) {

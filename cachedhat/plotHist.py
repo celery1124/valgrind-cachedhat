@@ -28,6 +28,8 @@ def main():
         line = fp.readline()
         cnt = 1
         while line:
+            if line.strip().find("res") != -1:
+                print(line+"\n")
             if line.strip(' ') == '\n':
                 # do nothing, filter out
                 if mat != None:
