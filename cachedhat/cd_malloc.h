@@ -1,7 +1,7 @@
 
 
 
-#define HISTOGRAM_SIZE_LOW 4194304
+#define HISTOGRAM_SIZE_LOW 1048576 // Better be LLC size
 #define TS_RES             16384
 #define MEM_RES            16384
 

@@ -62,6 +62,7 @@
 #define HISTOGRAM_SIZE_LIMIT 1024
 UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
 UInt  clo_mem_res = MEM_RES;/* mem space resolution */
+UInt  clo_hist_size_limit = HISTOGRAM_SIZE_LOW;
 // Values for the entire run.
 static ULong g_total_blocks = 0;
 static ULong g_total_bytes  = 0;
@@ -586,7 +587,7 @@ void* new_block ( ThreadId tid, void* p, SizeT req_szB, SizeT req_alignB,
 
    // set up heap histogram
    bk->histHead = NULL; bk->histNode = NULL;
-   if (req_szB >= HISTOGRAM_SIZE_LOW) {
+   if (req_szB >= clo_hist_size_limit) {
       init_hist_node(&(bk->histHead), &(bk->histNode), req_szB);
    }
 
@@ -2726,6 +2727,7 @@ static void write_AP_Hists(void)
 
    FHH("ts-res: %d\n", clo_ts_res);
    FHH("mem-res: %d\n", clo_mem_res);
+   FHH("hist-size-limit: %d\n", clo_hist_size_limit);
 
    VG_(initIterFM)(apinfo);
    Bool is_first = True;
@@ -3069,6 +3071,7 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_BOOL_CLO(arg, "--branch-sim", clo_branch_sim) {}
    else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
    else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
+   else if VG_INT_CLO(arg, "--hist-size-limit", clo_hist_size_limit) {}
    else
       return False;
 
