@@ -42,4 +42,4 @@ $DIR/cachedhat/plotHist.py heapProfileHist.out.pid outDir
 
 ## TODO
 
-Add access pattern analysis.  For example, for each malloc region, clssify access pattern as sequential,random,stride, etc.
+Add access pattern analysis.  For example, for each malloc region, classify access pattern as sequential,random,stride, etc.
