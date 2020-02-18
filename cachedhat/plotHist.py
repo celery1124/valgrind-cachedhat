@@ -61,8 +61,8 @@ def main():
                     mat = np.vstack([mat, col])
             line = fp.readline()
             cnt += 1
-            if cnt % 1e4 == 0:
-                print('[%d] 10k line pass\n' % (cnt/1e4))
+            if cnt % 1e3 == 0:
+                print('[%d] 1k line pass\n' % (cnt/1e3))
     # plot heatmap
     # a = np.random.random((16, 16))
     # print(type(a))
