@@ -21,6 +21,7 @@ def main():
         if exc.errno != errno.EEXIST:
             raise
         pass
+    ometaF = open(outFolder+"/meta.txt", "w")
 
     mat = None
     mat_name = None
@@ -30,6 +31,7 @@ def main():
         while line:
             if line.strip().find("res") != -1 or line.strip().find("size-limit") != -1:
                 print(line)
+                ometaF.write(line)
             elif line.strip(' ') == '\n':
                 # do nothing, filter out
                 if mat is not None:
@@ -63,7 +65,8 @@ def main():
             cnt += 1
             if cnt % 1e3 == 0:
                 print('[%d] 1k line pass\n' % (cnt/1e3))
-    # plot heatmap
+    ometaF.close()
+    # plot heatmap example
     # a = np.random.random((16, 16))
     # print(type(a))
     # plt.imshow(a, cmap='hot', interpolation='nearest')
