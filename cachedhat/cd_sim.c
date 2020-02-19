@@ -37,7 +37,7 @@
       - one block hits, the other misses --> one miss
       - both blocks miss                 --> one miss (not two)
 */
-#include "cd_malloc.h"
+#include "cd_heatmap.h"
 
 typedef struct {
    Int          size;                   /* bytes */
@@ -212,8 +212,8 @@ void cachesim_D1_doref(Addr a, UChar size, ULong* m1, ULong *mL, UChar rw) // r-
       (*m1)++;
       if (cachesim_ref_is_miss(&LL, a, size)) {
          (*mL)++;
-         if (rw == 0) malloc_handle_read(a, LL.line_size);
-         else malloc_handle_write(a, LL.line_size);
+         if (rw == 0) heap_handle_read(a, LL.line_size);
+         else heap_handle_write(a, LL.line_size);
       }
    }
 }

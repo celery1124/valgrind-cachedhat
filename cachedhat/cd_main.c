@@ -62,10 +62,10 @@
 #define HISTOGRAM_SIZE_LIMIT 1024
 UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
 UInt  clo_mem_res = MEM_RES;/* mem space resolution */
-UInt  clo_hist_size_limit = HISTOGRAM_SIZE_LOW;
+UInt  clo_hm_size_limit = HEAPMAP_SIZE_LIMIT;
 
-Bool clo_hist_read = False; /* profile read histogram? */
-Bool clo_hist_write = True; /* profile read histogram? */
+Bool clo_hm_read = False; /* profile read heatmap? */
+Bool clo_hm_write = True; /* profile read heatmap? */
 // Values for the entire run.
 static ULong g_total_blocks = 0;
 static ULong g_total_bytes  = 0;
@@ -218,8 +218,8 @@ typedef
       SizeT xsize;
       UInt* histo; /* [0 .. xsize-1] */
       
-      Hist*       histHead;
-      Hist*       histNode;
+      HeatMap*       HMHead;
+      HeatMap*       HMNode;
    }
    APInfo;
 
@@ -249,20 +249,20 @@ static void check_for_peak(void)
 }
 
 
-void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
-   (*head) = VG_(malloc)("dh.new_block.3", sizeof(Hist));
+void init_hm_node(HeatMap** head, HeatMap** node, SizeT req_szB) {
+   (*head) = VG_(malloc)("dh.new_block.3", sizeof(HeatMap));
    (*head)->mem_region_size = (req_szB/clo_mem_res + 1);
    if (req_szB == 0) {
       (*head)->mem_region_w = NULL; // dummy node
       (*head)->mem_region_r = NULL;
    }
    else {
-      if (clo_hist_write) {
+      if (clo_hm_write) {
          (*head)->mem_region_w = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
          VG_(memset)((*head)->mem_region_w, 0, (*head)->mem_region_size * sizeof(UInt));
       }
       else (*head)->mem_region_w = NULL;
-      if (clo_hist_read) {
+      if (clo_hm_read) {
          (*head)->mem_region_r = VG_(malloc)("dh.new_block.5", (*head)->mem_region_size * sizeof(UInt));
          VG_(memset)((*head)->mem_region_r, 0, (*head)->mem_region_size * sizeof(UInt));
       }
@@ -274,16 +274,16 @@ void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
    *node = (*head);
 }
 
-void add_hist_node(Hist** node, UInt size) {
+void add_hm_node(HeatMap** node, UInt size) {
    tl_assert((*node) != NULL);
-   Hist* new_node = VG_(malloc)("dh.new_block.3", sizeof(Hist));
+   HeatMap* new_node = VG_(malloc)("dh.new_block.3", sizeof(HeatMap));
    new_node->mem_region_size = size;
-   if (clo_hist_write) {
+   if (clo_hm_write) {
       new_node->mem_region_w = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
       VG_(memset)(new_node->mem_region_w, 0, new_node->mem_region_size * sizeof(UInt));
    }
    else new_node->mem_region_w = NULL;
-   if (clo_hist_read) {
+   if (clo_hm_read) {
       new_node->mem_region_r = VG_(malloc)("dh.new_block.5", new_node->mem_region_size * sizeof(UInt));
       VG_(memset)(new_node->mem_region_r, 0, new_node->mem_region_size * sizeof(UInt));
    }
@@ -297,8 +297,8 @@ void add_hist_node(Hist** node, UInt size) {
    (*node) = new_node;
 }
 
-void del_hist_list(Hist* head) {
-   Hist* next = head->next;
+void del_hm_list(HeatMap* head) {
+   HeatMap* next = head->next;
    while (next != NULL) {
       next = head->next;
       if (head->mem_region_w != NULL) VG_(free)(head->mem_region_w);
@@ -308,7 +308,7 @@ void del_hist_list(Hist* head) {
    }
 }
 
-void move_hist_list(Hist** curr, Hist* new_head, Hist* new_curr) {
+void move_hm_list(HeatMap** curr, HeatMap* new_head, HeatMap* new_curr) {
    tl_assert((*curr)->next == NULL);
    if (new_head != NULL) {
       (*curr)->next = new_head;
@@ -346,9 +346,9 @@ static void intro_Block ( Block* bk )
       api->xsize_tag = Unknown;
       api->xsize = 0;
       if (0) VG_(printf)("api %p   -->  Unknown\n", api);
-      // heap histogram
-      api->histHead = NULL; api->histNode = NULL;
-      init_hist_node(&(api->histHead), &(api->histNode), 0);
+      // heap heatmap
+      api->HMHead = NULL; api->HMNode = NULL;
+      init_hm_node(&(api->HMHead), &(api->HMNode), 0);
    }
 
    tl_assert(api->ap == bk->ap);
@@ -490,10 +490,10 @@ static void retire_Block ( Block* bk, Bool because_freed )
       if (0) VG_(printf)("fold in, AP = %p\n", api);
    }
 
-   // Heap hist list
-   if(bk->histHead != NULL) {
-      move_hist_list(&(api->histNode), bk->histHead, bk->histNode);
-      //VG_(printf)("api histHead %p, bk head %p, bk end %p\n", api->histHead, bk->histHead, bk->histNode);
+   // Heap heatmap list
+   if(bk->HMHead != NULL) {
+      move_hm_list(&(api->HMNode), bk->HMHead, bk->HMNode);
+      //VG_(printf)("api HMHead %p, bk head %p, bk end %p\n", api->HMHead, bk->HMHead, bk->HMNode);
    }
 
 #if 0
@@ -612,10 +612,10 @@ void* new_block ( ThreadId tid, void* p, SizeT req_szB, SizeT req_alignB,
       VG_(memset)(bk->histoW, 0, req_szB * sizeof(UShort));
    }
 
-   // set up heap histogram
-   bk->histHead = NULL; bk->histNode = NULL;
-   if (req_szB >= clo_hist_size_limit) {
-      init_hist_node(&(bk->histHead), &(bk->histNode), req_szB);
+   // set up heap heatmap list
+   bk->HMHead = NULL; bk->HMNode = NULL;
+   if (req_szB >= clo_hm_size_limit) {
+      init_hm_node(&(bk->HMHead), &(bk->HMNode), req_szB);
    }
 
    Bool present = VG_(addToFM)( interval_tree, (UWord)bk, (UWord)0/*no val*/);
@@ -727,10 +727,10 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
       resize_Block(bk->ap, bk->req_szB, new_req_szB);
       bk->payload = (Addr)p_new;
       bk->req_szB = new_req_szB;
-      if (bk->histNode == NULL) { // in case realloc is called before Hist node is allocated
-         init_hist_node(&(bk->histHead), &(bk->histNode), new_req_szB);
+      if (bk->HMNode == NULL) { // in case realloc is called before HeatMap node is allocated
+         init_hm_node(&(bk->HMHead), &(bk->HMNode), new_req_szB);
       }
-      else add_hist_node(&(bk->histNode), (new_req_szB/clo_mem_res + 1));
+      else add_hm_node(&(bk->HMNode), (new_req_szB/clo_mem_res + 1));
 
       // and re-add
       Bool present
@@ -2478,12 +2478,12 @@ static UInt ULong_width(ULong n)
 }
 
 static VgFile* fp_heap;
-static VgFile* fp_heap_hist_w;
-static VgFile* fp_heap_hist_r;
+static VgFile* fp_heap_hm_w;
+static VgFile* fp_heap_hm_r;
 
 #define FP(format, args...) ({ VG_(fprintf)(fp_heap, format, ##args); })
-#define FHHW(format, args...) ({ VG_(fprintf)(fp_heap_hist_w, format, ##args); })
-#define FHHR(format, args...) ({ VG_(fprintf)(fp_heap_hist_r, format, ##args); })
+#define FHHW(format, args...) ({ VG_(fprintf)(fp_heap_hm_w, format, ##args); })
+#define FHHR(format, args...) ({ VG_(fprintf)(fp_heap_hm_r, format, ##args); })
 
 // The frame table holds unique frames.
 static WordFM* frame_tbl = NULL;
@@ -2636,8 +2636,8 @@ static void write_APInfo_frame2(UInt n, DiEpoch ep, Addr ip, void* opaque)
          tl_assert(!present);
       }
 
-      if (clo_hist_write) FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
-      if (clo_hist_read) FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
+      if (clo_hm_write) FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
+      if (clo_hm_read) FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
       *is_first = False;
 
    } while (VG_(next_IIPC)(iipc));
@@ -2729,54 +2729,54 @@ static void write_APInfos(void)
 }
 
 
-static void write_AP_Hist(APInfo* api, Bool is_first)
+static void write_AP_HM(APInfo* api, Bool is_first)
 {
    tl_assert(api->total_blocks >= api->max_blocks);
    tl_assert(api->total_bytes >= api->max_bytes);
 
-   if (clo_hist_write) FHHW("w_fs: ");
-   if (clo_hist_read) FHHR("r_fs: ");
+   if (clo_hm_write) FHHW("w_fs: ");
+   if (clo_hm_read) FHHR("r_fs: ");
    Bool is_first_frame = True;
    VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
-   if (clo_hist_write) FHHW("]\n");
-   if (clo_hist_read) FHHR("]\n");
+   if (clo_hm_write) FHHW("]\n");
+   if (clo_hm_read) FHHR("]\n");
 
-   Hist* hist_node = api->histHead->next; // dummy head for api
+   HeatMap* hm_node = api->HMHead->next; // dummy head for api
    
-   while(hist_node != NULL) {
-      for (UInt i = 0; i < hist_node->mem_region_size; i++) {
-         if (clo_hist_write) FHHW("%d\t", hist_node->mem_region_w[i]);
-         if (clo_hist_read) FHHR("%d\t", hist_node->mem_region_r[i]);
+   while(hm_node != NULL) {
+      for (UInt i = 0; i < hm_node->mem_region_size; i++) {
+         if (clo_hm_write) FHHW("%d\t", hm_node->mem_region_w[i]);
+         if (clo_hm_read) FHHR("%d\t", hm_node->mem_region_r[i]);
       }
-      if (clo_hist_write) FHHW("\n");
-      if (clo_hist_read) FHHR("\n");
-      //VG_(printf)("print head %p, hist_node %p\n", api->histHead, hist_node);
-      hist_node = hist_node->next;
+      if (clo_hm_write) FHHW("\n");
+      if (clo_hm_read) FHHR("\n");
+      //VG_(printf)("print head %p, hm_node %p\n", api->HMHead, hm_node);
+      hm_node = hm_node->next;
    }
 
-   if (clo_hist_write) FHHW("\n\n");
-   if (clo_hist_read) FHHR("\n\n");
+   if (clo_hm_write) FHHW("\n\n");
+   if (clo_hm_read) FHHR("\n\n");
 }
 
-static void write_AP_Hists(void)
+static void write_AP_HMs(void)
 {
    UWord keyW, valW;
 
-   if (clo_hist_write) FHHW("ts-res: %d\n", clo_ts_res);
-   if (clo_hist_write) FHHW("mem-res: %d\n", clo_mem_res);
-   if (clo_hist_write) FHHW("hist-size-limit: %d\n", clo_hist_size_limit);
+   if (clo_hm_write) FHHW("ts-res: %d\n", clo_ts_res);
+   if (clo_hm_write) FHHW("mem-res: %d\n", clo_mem_res);
+   if (clo_hm_write) FHHW("hm-size-limit: %d\n", clo_hm_size_limit);
 
-   if (clo_hist_read) FHHR("ts-res: %d\n", clo_ts_res);
-   if (clo_hist_read) FHHR("mem-res: %d\n", clo_mem_res);
-   if (clo_hist_read) FHHR("hist-size-limit: %d\n", clo_hist_size_limit);
+   if (clo_hm_read) FHHR("ts-res: %d\n", clo_ts_res);
+   if (clo_hm_read) FHHR("mem-res: %d\n", clo_mem_res);
+   if (clo_hm_read) FHHR("hm-size-limit: %d\n", clo_hm_size_limit);
 
    VG_(initIterFM)(apinfo);
    Bool is_first = True;
    while (VG_(nextIterFM)(apinfo, &keyW, &valW)) {
       APInfo* api = (APInfo*)valW;
       tl_assert(api && api->ap == (ExeContext*)keyW);
-      if(api->histHead != api->histNode) {
-         write_AP_Hist(api, is_first);
+      if(api->HMHead != api->HMNode) {
+         write_AP_HM(api, is_first);
          is_first = False;
       }
    }
@@ -2934,8 +2934,8 @@ static void cd_fini(Int exitcode)
 
    // Malloc profile print
    const HChar* clo_dhat_out_file = "heapProfile.out.%p";
-   const HChar* clo_hist_out_file_w = "heapProfileHistW.out.%p";
-   const HChar* clo_hist_out_file_r = "heapProfileHistR.out.%p";
+   const HChar* clo_hm_out_file_w = "heapProfileHMW.out.%p";
+   const HChar* clo_hm_out_file_r = "heapProfileHMR.out.%p";
 
    // Total bytes might be at a possible peak.
    check_for_peak();
@@ -2980,10 +2980,10 @@ static void cd_fini(Int exitcode)
    // 3.3.0.
    HChar* dhat_out_file =
       VG_(expand_file_name)("--dhat-out-file", clo_dhat_out_file);
-   HChar* dhat_hist_out_file_w =
-      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file_w);
-   HChar* dhat_hist_out_file_r =
-      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file_r);
+   HChar* dhat_hm_out_file_w =
+      VG_(expand_file_name)("--dhat-out-file", clo_hm_out_file_w);
+   HChar* dhat_hm_out_file_r =
+      VG_(expand_file_name)("--dhat-out-file", clo_hm_out_file_r);
 
    fp_heap = VG_(fopen)(dhat_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
                    VKI_S_IRUSR|VKI_S_IWUSR);
@@ -2992,19 +2992,19 @@ static void cd_fini(Int exitcode)
       return;
    }
 
-   if (clo_hist_write) {
-      fp_heap_hist_w = VG_(fopen)(dhat_hist_out_file_w, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+   if (clo_hm_write) {
+      fp_heap_hm_w = VG_(fopen)(dhat_hm_out_file_w, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
                         VKI_S_IRUSR|VKI_S_IWUSR);
-      if (!fp_heap_hist_w) {
-         VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file_w);
+      if (!fp_heap_hm_w) {
+         VG_(umsg)("error: can't open DHAT heatmap output file '%s'\n", dhat_hm_out_file_w);
          return;
       }
    }
-   if (clo_hist_read) {
-      fp_heap_hist_r = VG_(fopen)(dhat_hist_out_file_r, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+   if (clo_hm_read) {
+      fp_heap_hm_r = VG_(fopen)(dhat_hm_out_file_r, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
                         VKI_S_IRUSR|VKI_S_IWUSR);
-      if (!fp_heap_hist_r) {
-         VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file_r);
+      if (!fp_heap_hm_r) {
+         VG_(umsg)("error: can't open DHAT heatmap output file '%s'\n", dhat_hm_out_file_r);
          return;
       }
    }
@@ -3031,8 +3031,8 @@ static void cd_fini(Int exitcode)
    // APs.
    write_APInfos();
 
-   // Heap histograms
-   write_AP_Hists();
+   // Heap heatmaps
+   write_AP_HMs();
 
    // Frame table.
    FP(",\"ftbl\":\n");
@@ -3061,13 +3061,13 @@ static void cd_fini(Int exitcode)
    VG_(fclose)(fp_heap);
    fp_heap = NULL;
 
-   if (clo_hist_write) {
-      VG_(fclose)(fp_heap_hist_w);
-      fp_heap_hist_w = NULL;
+   if (clo_hm_write) {
+      VG_(fclose)(fp_heap_hm_w);
+      fp_heap_hm_w = NULL;
    }
-   if (clo_hist_read) {
-      VG_(fclose)(fp_heap_hist_r);
-      fp_heap_hist_r = NULL;
+   if (clo_hm_read) {
+      VG_(fclose)(fp_heap_hm_r);
+      fp_heap_hm_r = NULL;
    }
 
    if (VG_(clo_verbosity) == 0) {
@@ -3128,11 +3128,11 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_STR_CLO( arg, "--cachegrind-out-file", clo_cachegrind_out_file) {}
    else if VG_BOOL_CLO(arg, "--cache-sim",  clo_cache_sim)  {}
    else if VG_BOOL_CLO(arg, "--branch-sim", clo_branch_sim) {}
-   else if VG_BOOL_CLO(arg, "--hist-read", clo_hist_read) {}
-   else if VG_BOOL_CLO(arg, "--hist-write", clo_hist_write) {}
+   else if VG_BOOL_CLO(arg, "--hm-read", clo_hm_read) {}
+   else if VG_BOOL_CLO(arg, "--hm-write", clo_hm_write) {}
    else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
    else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
-   else if VG_INT_CLO(arg, "--hist-size-limit", clo_hist_size_limit) {}
+   else if VG_INT_CLO(arg, "--hm-size-limit", clo_hm_size_limit) {}
    else
       return False;
 
