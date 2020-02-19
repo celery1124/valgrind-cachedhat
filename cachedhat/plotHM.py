@@ -11,7 +11,7 @@ import numpy as np
 def main():
     # print command line arguments
     if len(sys.argv) <= 2:
-        print('usage:\n./plotHist.py heapProfileHist.out heatmap_folder')
+        print('usage:\n./plotHM.py heapProfileHM(R/W).out heatmap_folder')
         exit()
     filename = sys.argv[1]
     outFolder = sys.argv[2]
