@@ -10,9 +10,11 @@ struct Hist;
 typedef 
    struct {
       struct Hist*    next;
-      UInt*    mem_region;
+      UInt*    mem_region_r;
+      UInt*    mem_region_w;
       UInt     mem_region_size;
-      UInt     ts;
+      UInt     ts_r;
+      UInt     ts_w;
    } Hist;
 typedef
    struct {
@@ -34,6 +36,8 @@ typedef
 // export function
 extern UInt clo_ts_res;
 extern UInt clo_mem_res;
+extern Bool clo_hist_read;
+extern Bool clo_hist_write;
 extern Block* find_Block_containing ( Addr a );
 extern void add_hist_node(Hist** node, UInt size);
 
@@ -42,10 +46,10 @@ inline void malloc_handle_write ( Addr addr, UWord szB )
    Block* bk = find_Block_containing(addr);
    if (bk) {
       bk->writes_bytes += szB;
-      if(bk->histHead) {
-         bk->histNode->mem_region[(addr-bk->payload)/clo_mem_res]++;
-         if(++(bk->histNode->ts) == clo_ts_res) add_hist_node(&(bk->histNode), bk->histNode->mem_region_size);
-         //VG_(printf)("node %p, ts %d\n", bk->histNode, bk->histNode->ts);
+      if(clo_hist_write && bk->histHead != NULL) {
+         bk->histNode->mem_region_w[(addr-bk->payload)/clo_mem_res]++;
+         if(++(bk->histNode->ts_w) == clo_ts_res) add_hist_node(&(bk->histNode), bk->histNode->mem_region_size);
+         //VG_(printf)("node %p, ts_w %d\n", bk->histNode, bk->histNode->ts_w);
       }
    }
 }
@@ -55,9 +59,10 @@ inline void malloc_handle_read ( Addr addr, UWord szB )
    Block* bk = find_Block_containing(addr);
    if (bk) {
       bk->reads_bytes += szB;
-      // if(bk->histHead) {
-      //    bk->histNode->mem_region[(addr-bk->payload)/clo_mem_res]++;
-      //    if(++(bk->histNode->ts) == clo_ts_res) add_hist_node(&(bk->histNode));
-      // }
+      if(clo_hist_read && bk->histHead != NULL) {
+         bk->histNode->mem_region_r[(addr-bk->payload)/clo_mem_res]++;
+         if(++(bk->histNode->ts_r) == clo_ts_res) add_hist_node(&(bk->histNode), bk->histNode->mem_region_size);
+         //VG_(printf)("node %p, ts_r %d\n", bk->histNode, bk->histNode->ts_r);
+      }
    }
 }

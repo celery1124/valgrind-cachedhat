@@ -63,6 +63,9 @@
 UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
 UInt  clo_mem_res = MEM_RES;/* mem space resolution */
 UInt  clo_hist_size_limit = HISTOGRAM_SIZE_LOW;
+
+Bool clo_hist_read = False; /* profile read histogram? */
+Bool clo_hist_write = True; /* profile read histogram? */
 // Values for the entire run.
 static ULong g_total_blocks = 0;
 static ULong g_total_bytes  = 0;
@@ -249,13 +252,25 @@ static void check_for_peak(void)
 void init_hist_node(Hist** head, Hist** node, SizeT req_szB) {
    (*head) = VG_(malloc)("dh.new_block.3", sizeof(Hist));
    (*head)->mem_region_size = (req_szB/clo_mem_res + 1);
-   if (req_szB == 0) (*head)->mem_region = NULL; // dummy node
+   if (req_szB == 0) {
+      (*head)->mem_region_w = NULL; // dummy node
+      (*head)->mem_region_r = NULL;
+   }
    else {
-      (*head)->mem_region = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
-      VG_(memset)((*head)->mem_region, 0, (*head)->mem_region_size * sizeof(UInt));
+      if (clo_hist_write) {
+         (*head)->mem_region_w = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
+         VG_(memset)((*head)->mem_region_w, 0, (*head)->mem_region_size * sizeof(UInt));
+      }
+      else (*head)->mem_region_w = NULL;
+      if (clo_hist_read) {
+         (*head)->mem_region_r = VG_(malloc)("dh.new_block.5", (*head)->mem_region_size * sizeof(UInt));
+         VG_(memset)((*head)->mem_region_r, 0, (*head)->mem_region_size * sizeof(UInt));
+      }
+      else (*head)->mem_region_r = NULL;
    }
    (*head)->next = NULL;
-   (*head)->ts = 0;
+   (*head)->ts_w = 0;
+   (*head)->ts_r = 0;
    *node = (*head);
 }
 
@@ -263,10 +278,21 @@ void add_hist_node(Hist** node, UInt size) {
    tl_assert((*node) != NULL);
    Hist* new_node = VG_(malloc)("dh.new_block.3", sizeof(Hist));
    new_node->mem_region_size = size;
-   new_node->mem_region = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
-   VG_(memset)(new_node->mem_region, 0, new_node->mem_region_size * sizeof(UInt));
+   if (clo_hist_write) {
+      new_node->mem_region_w = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
+      VG_(memset)(new_node->mem_region_w, 0, new_node->mem_region_size * sizeof(UInt));
+   }
+   else new_node->mem_region_w = NULL;
+   if (clo_hist_read) {
+      new_node->mem_region_r = VG_(malloc)("dh.new_block.5", new_node->mem_region_size * sizeof(UInt));
+      VG_(memset)(new_node->mem_region_r, 0, new_node->mem_region_size * sizeof(UInt));
+   }
+   else new_node->mem_region_r = NULL;
+   
+   
    new_node->next = NULL;
-   new_node->ts = 0;
+   new_node->ts_w = 0;
+   new_node->ts_r = 0;
    (*node)->next = new_node;
    (*node) = new_node;
 }
@@ -275,7 +301,8 @@ void del_hist_list(Hist* head) {
    Hist* next = head->next;
    while (next != NULL) {
       next = head->next;
-      VG_(free)(head->mem_region);
+      if (head->mem_region_w != NULL) VG_(free)(head->mem_region_w);
+      if (head->mem_region_r != NULL) VG_(free)(head->mem_region_r);
       VG_(free)(head);
       head = next;
    }
@@ -2451,10 +2478,12 @@ static UInt ULong_width(ULong n)
 }
 
 static VgFile* fp_heap;
-static VgFile* fp_heap_hist;
+static VgFile* fp_heap_hist_w;
+static VgFile* fp_heap_hist_r;
 
 #define FP(format, args...) ({ VG_(fprintf)(fp_heap, format, ##args); })
-#define FHH(format, args...) ({ VG_(fprintf)(fp_heap_hist, format, ##args); })
+#define FHHW(format, args...) ({ VG_(fprintf)(fp_heap_hist_w, format, ##args); })
+#define FHHR(format, args...) ({ VG_(fprintf)(fp_heap_hist_r, format, ##args); })
 
 // The frame table holds unique frames.
 static WordFM* frame_tbl = NULL;
@@ -2607,7 +2636,8 @@ static void write_APInfo_frame2(UInt n, DiEpoch ep, Addr ip, void* opaque)
          tl_assert(!present);
       }
 
-      FHH("%c%lu", *is_first ? '[' : ',', frame_n);
+      if (clo_hist_write) FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
+      if (clo_hist_read) FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
       *is_first = False;
 
    } while (VG_(next_IIPC)(iipc));
@@ -2704,30 +2734,41 @@ static void write_AP_Hist(APInfo* api, Bool is_first)
    tl_assert(api->total_blocks >= api->max_blocks);
    tl_assert(api->total_bytes >= api->max_bytes);
 
-   FHH("fs: ");
+   if (clo_hist_write) FHHW("fs: ");
+   if (clo_hist_read) FHHR("fs: ");
    Bool is_first_frame = True;
    VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
-   FHH("]\n");
+   if (clo_hist_write) FHHW("]\n");
+   if (clo_hist_read) FHHR("]\n");
 
    Hist* hist_node = api->histHead->next; // dummy head for api
    
    while(hist_node != NULL) {
-      for (UInt i = 0; i < hist_node->mem_region_size; i++) FHH("%d\t", hist_node->mem_region[i]);
-      FHH("\n");
+      for (UInt i = 0; i < hist_node->mem_region_size; i++) {
+         if (clo_hist_write) FHHW("%d\t", hist_node->mem_region_w[i]);
+         if (clo_hist_read) FHHR("%d\t", hist_node->mem_region_r[i]);
+      }
+      if (clo_hist_write) FHHW("\n");
+      if (clo_hist_read) FHHR("\n");
       //VG_(printf)("print head %p, hist_node %p\n", api->histHead, hist_node);
       hist_node = hist_node->next;
    }
 
-   FHH("\n\n");
+   if (clo_hist_write) FHHW("\n\n");
+   if (clo_hist_read) FHHR("\n\n");
 }
 
 static void write_AP_Hists(void)
 {
    UWord keyW, valW;
 
-   FHH("ts-res: %d\n", clo_ts_res);
-   FHH("mem-res: %d\n", clo_mem_res);
-   FHH("hist-size-limit: %d\n", clo_hist_size_limit);
+   if (clo_hist_write) FHHW("ts-res: %d\n", clo_ts_res);
+   if (clo_hist_write) FHHW("mem-res: %d\n", clo_mem_res);
+   if (clo_hist_write) FHHW("hist-size-limit: %d\n", clo_hist_size_limit);
+
+   if (clo_hist_read) FHHR("ts-res: %d\n", clo_ts_res);
+   if (clo_hist_read) FHHR("mem-res: %d\n", clo_mem_res);
+   if (clo_hist_read) FHHR("hist-size-limit: %d\n", clo_hist_size_limit);
 
    VG_(initIterFM)(apinfo);
    Bool is_first = True;
@@ -2740,8 +2781,6 @@ static void write_AP_Hists(void)
       }
    }
    VG_(doneIterFM)(apinfo);
-
-   FHH("\n");
 }
 
 static void cd_fini(Int exitcode)
@@ -2895,7 +2934,8 @@ static void cd_fini(Int exitcode)
 
    // Malloc profile print
    const HChar* clo_dhat_out_file = "heapProfile.out.%p";
-   const HChar* clo_hist_out_file = "heapProfileHist.out.%p";
+   const HChar* clo_hist_out_file_w = "heapProfileHistW.out.%p";
+   const HChar* clo_hist_out_file_r = "heapProfileHistR.out.%p";
 
    // Total bytes might be at a possible peak.
    check_for_peak();
@@ -2940,8 +2980,10 @@ static void cd_fini(Int exitcode)
    // 3.3.0.
    HChar* dhat_out_file =
       VG_(expand_file_name)("--dhat-out-file", clo_dhat_out_file);
-   HChar* dhat_hist_out_file =
-      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file);
+   HChar* dhat_hist_out_file_w =
+      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file_w);
+   HChar* dhat_hist_out_file_r =
+      VG_(expand_file_name)("--dhat-out-file", clo_hist_out_file_r);
 
    fp_heap = VG_(fopen)(dhat_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
                    VKI_S_IRUSR|VKI_S_IWUSR);
@@ -2950,12 +2992,23 @@ static void cd_fini(Int exitcode)
       return;
    }
 
-   fp_heap_hist = VG_(fopen)(dhat_hist_out_file, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
-                   VKI_S_IRUSR|VKI_S_IWUSR);
-   if (!fp_heap_hist) {
-      VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file);
-      return;
+   if (clo_hist_write) {
+      fp_heap_hist_w = VG_(fopen)(dhat_hist_out_file_w, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+                        VKI_S_IRUSR|VKI_S_IWUSR);
+      if (!fp_heap_hist_w) {
+         VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file_w);
+         return;
+      }
    }
+   if (clo_hist_read) {
+      fp_heap_hist_r = VG_(fopen)(dhat_hist_out_file_r, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
+                        VKI_S_IRUSR|VKI_S_IWUSR);
+      if (!fp_heap_hist_r) {
+         VG_(umsg)("error: can't open DHAT HIST output file '%s'\n", dhat_hist_out_file_r);
+         return;
+      }
+   }
+   
 
    // Write to data file.
    FP("{\"dhatFileVersion\":1\n");
@@ -3008,8 +3061,14 @@ static void cd_fini(Int exitcode)
    VG_(fclose)(fp_heap);
    fp_heap = NULL;
 
-   VG_(fclose)(fp_heap_hist);
-   fp_heap_hist = NULL;
+   if (clo_hist_write) {
+      VG_(fclose)(fp_heap_hist_w);
+      fp_heap_hist_w = NULL;
+   }
+   if (clo_hist_read) {
+      VG_(fclose)(fp_heap_hist_r);
+      fp_heap_hist_r = NULL;
+   }
 
    if (VG_(clo_verbosity) == 0) {
       return;
@@ -3069,6 +3128,8 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_STR_CLO( arg, "--cachegrind-out-file", clo_cachegrind_out_file) {}
    else if VG_BOOL_CLO(arg, "--cache-sim",  clo_cache_sim)  {}
    else if VG_BOOL_CLO(arg, "--branch-sim", clo_branch_sim) {}
+   else if VG_BOOL_CLO(arg, "--hist-read", clo_hist_read) {}
+   else if VG_BOOL_CLO(arg, "--hist-write", clo_hist_write) {}
    else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
    else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
    else if VG_INT_CLO(arg, "--hist-size-limit", clo_hist_size_limit) {}
