@@ -2734,8 +2734,8 @@ static void write_AP_Hist(APInfo* api, Bool is_first)
    tl_assert(api->total_blocks >= api->max_blocks);
    tl_assert(api->total_bytes >= api->max_bytes);
 
-   if (clo_hist_write) FHHW("fs: ");
-   if (clo_hist_read) FHHR("fs: ");
+   if (clo_hist_write) FHHW("w_fs: ");
+   if (clo_hist_read) FHHR("r_fs: ");
    Bool is_first_frame = True;
    VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
    if (clo_hist_write) FHHW("]\n");
