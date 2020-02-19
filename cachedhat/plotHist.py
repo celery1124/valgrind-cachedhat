@@ -28,11 +28,11 @@ def main():
         line = fp.readline()
         cnt = 1
         while line:
-            if line.strip().find("res") != -1:
-                print(line+"\n")
-            if line.strip(' ') == '\n':
+            if line.strip().find("res") != -1 or line.strip().find("size-limit") != -1:
+                print(line)
+            elif line.strip(' ') == '\n':
                 # do nothing, filter out
-                if mat != None:
+                if mat is not None:
                     plt.xlabel('mem addr')
                     plt.ylabel('time')
                     plt.imshow(mat, cmap='hot', interpolation='nearest')
@@ -46,7 +46,7 @@ def main():
                 col = (line.strip('\t\n').replace("\t"," "))
                 col = list(map(int, col.split()))
                 col = np.ndarray((1,len(col)), buffer=np.array(col))
-                if mat == None:
+                if mat is None:
                     mat = col
                 else:
                     if col.shape[1]> mat.shape[1]:
