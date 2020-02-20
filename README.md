@@ -23,7 +23,19 @@ The tool parameters are currently same as cachegrind.
 
 Heap profile is saved in heapProfile.out.pid in the run directory. You can analyze this result by the html included in dhat tool. Heap profile heatmap (time vs address) is saved in heapProfileHM(R/W).out.pid in the run directory.
 
-Heap profile heatmap has several parameters to control.  --ts-res controls the time resolution (here time is actual count of memory reference rather than real processor cycles).  --mem-res controls the memory resolution, finer granularity requires more space to store the heatmap. --hm-size-limit controls the heap region size limit to record for heatmap. (Better set this as same as the LLC size). --hm-read=(**yes**/no),--hm-write=(yes/**no**) controls whether profile the read/write requests.
+Heap profile heatmap has several parameters to control.  
+
+```
+--ts-res controls the time resolution (here time is actual count of memory reference rather than real processor cycles).  
+--mem-res controls the memory resolution, finer granularity requires more space to store the heatmap. 
+--hm-read=(**yes**/no) controls whether record the read requests heatmaps.
+--hm-write=(yes/**no**) controls whether record the write requests heatmaps.
+--hm-size-limit controls the heap region size limit to record for heatmap. (Better set this as same as the LLC size). 
+--hm-writes-limit controls the lower limit of the total writes bytes to record heatmap.
+--hm-reads-limit controls the lower limit of the total reads bytes to record heatmap.
+```
+
+Here is an example of the running script.
 
 ``` bash
 # DIR is project root directory
