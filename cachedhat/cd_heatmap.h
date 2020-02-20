@@ -1,7 +1,9 @@
 
 
 
-#define HEAPMAP_SIZE_LIMIT 1048576 // Better be LLC size
+#define HEATMAP_SIZE_LIMIT 1048576 // Better be LLC size
+#define HEATMAP_READS_LIMIT   78905344
+#define HEATMAP_WRITES_LIMIT  78905344
 #define TS_RES             16384
 #define MEM_RES            16384
 

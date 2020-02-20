@@ -62,7 +62,9 @@
 #define HISTOGRAM_SIZE_LIMIT 1024
 UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
 UInt  clo_mem_res = MEM_RES;/* mem space resolution */
-UInt  clo_hm_size_limit = HEAPMAP_SIZE_LIMIT;
+UInt  clo_hm_size_limit = HEATMAP_SIZE_LIMIT;
+ULong  clo_hm_writes_limit = HEATMAP_WRITES_LIMIT;
+ULong  clo_hm_reads_limit = HEATMAP_READS_LIMIT;
 
 Bool clo_hm_read = False; /* profile read heatmap? */
 Bool clo_hm_write = True; /* profile read heatmap? */
@@ -2469,7 +2471,7 @@ static void write_APInfo_frame(UInt n, DiEpoch ep, Addr ip, void* opaque)
    VG_(delete_IIPC)(iipc);
 };
 
-static void write_APInfo_frame2(UInt n, DiEpoch ep, Addr ip, void* opaque)
+static void write_APInfo_frameW(UInt n, DiEpoch ep, Addr ip, void* opaque)
 {
    Bool* is_first = (Bool*)opaque;
    InlIPCursor* iipc = VG_(new_IIPC)(ep, ip);
@@ -2502,6 +2504,45 @@ static void write_APInfo_frame2(UInt n, DiEpoch ep, Addr ip, void* opaque)
       }
 
       if (clo_hm_write) FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
+      *is_first = False;
+
+   } while (VG_(next_IIPC)(iipc));
+
+   VG_(delete_IIPC)(iipc);
+};
+
+static void write_APInfo_frameR(UInt n, DiEpoch ep, Addr ip, void* opaque)
+{
+   Bool* is_first = (Bool*)opaque;
+   InlIPCursor* iipc = VG_(new_IIPC)(ep, ip);
+
+   do {
+      const HChar* buf = VG_(describe_IP)(ep, ip, iipc);
+
+      // Skip entries in vg_replace_malloc.c (e.g. `malloc`, `calloc`,
+      // `realloc`, `operator new`) because they're boring and clog up the
+      // output.
+      if (VG_(strstr)(buf, "vg_replace_malloc.c")) {
+         continue;
+      }
+
+      // If this description has been seen before, get its number. Otherwise,
+      // give it a new number and put it in the table.
+      UWord keyW = 0, valW = 0;
+      UWord frame_n = 0;
+      Bool found = VG_(lookupFM)(frame_tbl, &keyW, &valW, (UWord)buf);
+      if (found) {
+         //const HChar* str = (const HChar*)keyW;
+         //tl_assert(0 == VG_(strcmp)(buf, str));
+         frame_n = valW;
+      } else {
+         // `buf` is a static buffer, we must copy it.
+         const HChar* str = VG_(strdup)("dh.frame_tbl.3", buf);
+         frame_n = next_frame_n++;
+         Bool present = VG_(addToFM)(frame_tbl, (UWord)str, frame_n);
+         tl_assert(!present);
+      }
+
       if (clo_hm_read) FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
       *is_first = False;
 
@@ -2599,28 +2640,32 @@ static void write_AP_HM(APInfo* api, Bool is_first)
    tl_assert(api->total_blocks >= api->max_blocks);
    tl_assert(api->total_bytes >= api->max_bytes);
 
-   if (clo_hm_write) FHHW("w_fs: ");
-   if (clo_hm_read) FHHR("r_fs: ");
-   Bool is_first_frame = True;
-   VG_(apply_ExeContext)(write_APInfo_frame2, &is_first_frame, api->ap);
-   if (clo_hm_write) FHHW("]\n");
-   if (clo_hm_read) FHHR("]\n");
+   if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) {
+      FHHW("w_fs: ");
+      Bool is_first_frame = True;
+      VG_(apply_ExeContext)(write_APInfo_frameW, &is_first_frame, api->ap);
+      FHHW("]\n");
+   }
+
+   if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) {
+      FHHR("r_fs: ");
+      Bool is_first_frame = True;
+      VG_(apply_ExeContext)(write_APInfo_frameR, &is_first_frame, api->ap);
+      FHHR("]\n");
+   }
 
    HeatMap* hm_node = api->HMHead->next; // dummy head for api
-   
+
    while(hm_node != NULL) {
       for (UInt i = 0; i < hm_node->mem_region_size; i++) {
-         if (clo_hm_write) FHHW("%d\t", hm_node->mem_region_w[i]);
-         if (clo_hm_read) FHHR("%d\t", hm_node->mem_region_r[i]);
+         if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) FHHW("%d\t", hm_node->mem_region_w[i]);
+         if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) FHHR("%d\t", hm_node->mem_region_r[i]);
       }
-      if (clo_hm_write) FHHW("\n");
-      if (clo_hm_read) FHHR("\n");
+      if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) FHHW("\n");
+      if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) FHHR("\n");
       //VG_(printf)("print head %p, hm_node %p\n", api->HMHead, hm_node);
       hm_node = hm_node->next;
    }
-
-   if (clo_hm_write) FHHW("\n\n");
-   if (clo_hm_read) FHHR("\n\n");
 }
 
 static void write_AP_HMs(void)
