@@ -336,6 +336,9 @@ static void intro_Block ( Block* bk )
    if (found) {
       api = (APInfo*)valW;
       tl_assert(keyW == (UWord)bk->ap);
+      if (bk->HMHead == NULL && api->curr_bytes >= clo_hm_size_limit) {
+         init_hm_node(&(bk->HMHead), &(bk->HMNode), bk->req_szB);
+      }
    } else {
       api = VG_(malloc)( "dh.intro_Block.1", sizeof(APInfo) );
       VG_(memset)(api, 0, sizeof(*api));
@@ -348,6 +351,7 @@ static void intro_Block ( Block* bk )
       api->xsize_tag = Unknown;
       api->xsize = 0;
       if (0) VG_(printf)("api %p   -->  Unknown\n", api);
+
       // heap heatmap
       api->HMHead = NULL; api->HMNode = NULL;
       init_hm_node(&(api->HMHead), &(api->HMNode), 0);
@@ -513,7 +517,7 @@ static void retire_Block ( Block* bk, Bool because_freed )
 
 /* This handles block resizing.  When a block with AP 'ec' has a
    size change of 'delta', call here to update the APInfo. */
-static void resize_Block(ExeContext* ec, SizeT old_req_szB, SizeT new_req_szB)
+static void resize_Block(Block *bk, ExeContext* ec, SizeT old_req_szB, SizeT new_req_szB)
 {
    Long    delta = (Long)new_req_szB - (Long)old_req_szB;
    APInfo* api   = NULL;
@@ -566,6 +570,15 @@ static void resize_Block(ExeContext* ec, SizeT old_req_szB, SizeT new_req_szB)
    if (api->curr_bytes > api->max_bytes) {
       api->max_blocks = api->curr_blocks;
       api->max_bytes  = api->curr_bytes;
+   }
+
+   // update heatmap node info
+   if (bk->HMNode != NULL) {
+      add_hm_node(&(bk->HMNode), (new_req_szB/clo_mem_res + 1)); // add node with new req size
+   }
+   else { // in case realloc is called before HeatMap node is allocated
+      if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit)
+         init_hm_node(&(bk->HMHead), &(bk->HMNode), new_req_szB);
    }
 }
 
@@ -700,7 +713,7 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
    if (new_req_szB <= bk->req_szB) {
 
       // New size is smaller or same; block not moved.
-      resize_Block(bk->ap, bk->req_szB, new_req_szB);
+      resize_Block(bk, bk->ap, bk->req_szB, new_req_szB);
       bk->req_szB = new_req_szB;
       return p_old;
 
@@ -726,13 +739,9 @@ void* renew_block ( ThreadId tid, void* p_old, SizeT new_req_szB )
       // is still alive
 
       // Update the metadata.
-      resize_Block(bk->ap, bk->req_szB, new_req_szB);
+      resize_Block(bk, bk->ap, bk->req_szB, new_req_szB);
       bk->payload = (Addr)p_new;
       bk->req_szB = new_req_szB;
-      if (bk->HMNode == NULL) { // in case realloc is called before HeatMap node is allocated
-         init_hm_node(&(bk->HMHead), &(bk->HMNode), new_req_szB);
-      }
-      else add_hm_node(&(bk->HMNode), (new_req_szB/clo_mem_res + 1));
 
       // and re-add
       Bool present
