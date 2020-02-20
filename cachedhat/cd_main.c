@@ -336,8 +336,8 @@ static void intro_Block ( Block* bk )
    if (found) {
       api = (APInfo*)valW;
       tl_assert(keyW == (UWord)bk->ap);
-      // if (bk->HMHead == NULL && api->curr_bytes >= clo_hm_size_limit) { // TODO
-      if (bk->HMHead == NULL) {
+      // if (bk->HMHead == NULL && (bk->req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit)) { // TODO
+      if (bk->HMHead == NULL && bk->req_szB >= clo_hm_size_limit) {
          init_hm_node(&(bk->HMHead), &(bk->HMNode), bk->req_szB);
       }
    } else {
