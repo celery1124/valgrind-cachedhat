@@ -336,7 +336,8 @@ static void intro_Block ( Block* bk )
    if (found) {
       api = (APInfo*)valW;
       tl_assert(keyW == (UWord)bk->ap);
-      if (bk->HMHead == NULL && api->curr_bytes >= clo_hm_size_limit) {
+      // if (bk->HMHead == NULL && api->curr_bytes >= clo_hm_size_limit) { // TODO
+      if (bk->HMHead == NULL) {
          init_hm_node(&(bk->HMHead), &(bk->HMNode), bk->req_szB);
       }
    } else {
@@ -577,8 +578,10 @@ static void resize_Block(Block *bk, ExeContext* ec, SizeT old_req_szB, SizeT new
       add_hm_node(&(bk->HMNode), (new_req_szB/clo_mem_res + 1)); // add node with new req size
    }
    else { // in case realloc is called before HeatMap node is allocated
-      if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit)
+      // if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) { // TODO
+      if (new_req_szB >= clo_hm_size_limit) {
          init_hm_node(&(bk->HMHead), &(bk->HMNode), new_req_szB);
+      }
    }
 }
 
