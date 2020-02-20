@@ -3043,6 +3043,8 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
    else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
    else if VG_INT_CLO(arg, "--hm-size-limit", clo_hm_size_limit) {}
+   else if VG_INT_CLO(arg, "--hm-writes-limit", clo_hm_writes_limit) {}
+   else if VG_INT_CLO(arg, "--hm-reads-limit", clo_hm_reads_limit) {}
    else
       return False;
 
