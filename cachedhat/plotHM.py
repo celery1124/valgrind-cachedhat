@@ -74,6 +74,22 @@ def main():
             cnt += 1
             if cnt % 1e3 == 0:
                 print('[%d] 1k line pass' % (cnt/1e3))
+
+    # handle the end of file
+    if mat is not None:
+        plt.xlabel('mem addr')
+        plt.ylabel('time')
+        plt.imshow(mat, cmap='hot', interpolation='nearest')
+        # estimate locality, is this formula right?
+        avg_byts_per_bucket = np.sum(mat)/np.size(mat, 1)
+        total_0_axis = np.sum(mat, axis=0)
+        locality_0_aixs = np.absolute(total_0_axis - avg_byts_per_bucket)
+        # Or ?
+        # locality_0_aixs = total_0_axis - avg_byts_per_bucket * 0.95
+        # locality_0_aixs[locality_0_aixs < 0] = 0
+        est_locality = np.sum(locality_0_aixs)/np.sum(mat)
+        
+        plt.savefig(outFolder+"/"+mat_name+"_"+format(est_locality, '.3f')+".png", dpi=1000)
     ometaF.close()
     # plot heatmap example
     # a = np.random.random((16, 16))
