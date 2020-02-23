@@ -34,6 +34,8 @@ def main():
                 ometaF.write(line)
             elif line.strip(' ') == '\n':
                 # do nothing, filter out
+                pass
+            elif line.strip().find("fs") != -1:
                 if mat is not None:
                     plt.xlabel('mem addr')
                     plt.ylabel('time')
@@ -48,8 +50,7 @@ def main():
                     est_locality = np.sum(locality_0_aixs)/np.sum(mat)
                     
                     plt.savefig(outFolder+"/"+mat_name+"_"+format(est_locality, '.3f')+".png", dpi=1000)
-                    
-            elif line.strip().find("fs") != -1:
+
                 mat_name = line.strip()
                 # create new array
                 mat = None
