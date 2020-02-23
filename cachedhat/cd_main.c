@@ -2692,7 +2692,7 @@ static void write_AP_HMs(void)
    if (clo_hm_write) FHHW("hm-size-limit: %d\n", clo_hm_size_limit);
 
    if (clo_hm_read) FHHR("ts-read-res: %d\n", clo_tsr_res);
-   if (clo_hm_read) FHHR("mem-write-res: %d\n", clo_memr_res);
+   if (clo_hm_read) FHHR("mem-read-res: %d\n", clo_memr_res);
    if (clo_hm_read) FHHR("hm-size-limit: %d\n", clo_hm_size_limit);
 
    VG_(initIterFM)(apinfo);
