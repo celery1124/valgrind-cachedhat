@@ -45,7 +45,7 @@
 #include "pub_tool_machine.h"      // VG_(fnptr_to_fnentry)
 
 #include "pub_tool_replacemalloc.h"
-#include "pub_tool_wordfm.h"
+// #include "pub_tool_wordfm.h"
 
 #include "cd_arch.h"
 #include "cd_sim.c"
@@ -60,8 +60,10 @@
 //------------------------------------------------------------//
 
 #define HISTOGRAM_SIZE_LIMIT 1024
-UInt  clo_ts_res = TS_RES;  /* time resolution (#mem reference) */
-UInt  clo_mem_res = MEM_RES;/* mem space resolution */
+UInt  clo_tsr_res = TSR_RES;  /* time resolution (#mem reference) */
+UInt  clo_tsw_res = TSW_RES;  /* time resolution (#mem reference) */
+UInt  clo_memr_res = MEMR_RES;/* mem space resolution */
+UInt  clo_memw_res = MEMW_RES;/* mem space resolution */
 UInt  clo_hm_size_limit = HEATMAP_SIZE_LIMIT;
 ULong  clo_hm_writes_limit = HEATMAP_WRITES_LIMIT;
 ULong  clo_hm_reads_limit = HEATMAP_READS_LIMIT;
@@ -167,68 +169,36 @@ static void delete_Block_starting_at ( Addr a )
 }
 
 
-//------------------------------------------------------------//
-//--- a FM of allocation points (APs)                      ---//
-//------------------------------------------------------------//
-
-typedef
-   struct {
-      // The allocation point that we're summarising stats for.
-      ExeContext* ap;
-
-      // Total number of blocks and bytes allocated by this AP.
-      ULong total_blocks;
-      ULong total_bytes;
-
-      // The current number of blocks and bytes live for this AP.
-      ULong curr_blocks;
-      ULong curr_bytes;
-
-      // Values at the AP max, i.e. when this AP's curr_bytes peaks.
-      ULong max_blocks;     // Blocks at the AP max.
-      ULong max_bytes;      // The AP max, measured in bytes.
-
-      // Values at the global max.
-      ULong at_tgmax_blocks;
-      ULong at_tgmax_bytes;
-
-      // Total lifetimes of all blocks allocated by this AP. Includes blocks
-      // explicitly freed and blocks implicitly freed at termination.
-      ULong total_lifetimes_instrs;
-
-      // Number of blocks freed by this AP. (Only used in assertions.)
-      ULong freed_blocks;
-
-      // Total number of reads and writes in all blocks allocated
-      // by this AP.
-      ULong reads_bytes;
-      ULong writes_bytes;
-
-      /* Histogram information.  We maintain a histogram aggregated for
-         all retiring Blocks allocated by this AP, but only if:
-         - this AP has only ever allocated objects of one size
-         - that size is <= HISTOGRAM_SIZE_LIMIT
-         What we need therefore is a mechanism to see if this AP
-         has only ever allocated blocks of one size.
-
-         3 states:
-            Unknown          because no retirement yet
-            Exactly xsize    all retiring blocks are of this size
-            Mixed            multiple different sizes seen
-      */
-      enum { Unknown=999, Exactly, Mixed } xsize_tag;
-      SizeT xsize;
-      UInt* histo; /* [0 .. xsize-1] */
-      
-      HeatMap*       HMHead;
-      HeatMap*       HMNode;
-   }
-   APInfo;
-
 /* maps ExeContext*'s to APInfo*'s.  Note that the keys must match the
    .ap field in the values. */
-static WordFM* apinfo = NULL;  /* WordFM* ExeContext* APInfo* */
+WordFM* apinfo = NULL;  /* WordFM* ExeContext* APInfo* */
 
+static
+void add_counter_update(IRSB* sbOut, Int n)
+{
+   #if defined(VG_BIGENDIAN)
+   # define END Iend_BE
+   #elif defined(VG_LITTLEENDIAN)
+   # define END Iend_LE
+   #else
+   # error "Unknown endianness"
+   #endif
+   // Add code to increment 'g_curr_instrs' by 'n', like this:
+   //   WrTmp(t1, Load64(&g_curr_instrs))
+   //   WrTmp(t2, Add64(RdTmp(t1), Const(n)))
+   //   Store(&g_curr_instrs, t2)
+   IRTemp t1 = newIRTemp(sbOut->tyenv, Ity_I64);
+   IRTemp t2 = newIRTemp(sbOut->tyenv, Ity_I64);
+   IRExpr* counter_addr = mkIRExpr_HWord( (HWord)&g_curr_instrs );
+
+   IRStmt* st1 = assign(t1, IRExpr_Load(END, Ity_I64, counter_addr));
+   IRStmt* st2 = assign(t2, binop(Iop_Add64, mkexpr(t1), mkU64(n)));
+   IRStmt* st3 = IRStmt_Store(END, counter_addr, mkexpr(t2));
+
+   addStmtToIRSB( sbOut, st1 );
+   addStmtToIRSB( sbOut, st2 );
+   addStmtToIRSB( sbOut, st3 );
+}
 
 // Are we at peak memory? If so, update at_tgmax_blocks and at_tgmax_bytes in
 // all APInfos. Note that this is moderately expensive so we avoid calling it
@@ -251,70 +221,50 @@ static void check_for_peak(void)
 }
 
 
-void init_hm_node(HeatMap** head, HeatMap** node, SizeT req_szB) {
-   (*head) = VG_(malloc)("dh.new_block.3", sizeof(HeatMap));
-   (*head)->mem_region_size = (req_szB/clo_mem_res + 1);
-   if (req_szB == 0) {
-      (*head)->mem_region_w = NULL; // dummy node
-      (*head)->mem_region_r = NULL;
-   }
-   else {
-      if (clo_hm_write) {
-         (*head)->mem_region_w = VG_(malloc)("dh.new_block.4", (*head)->mem_region_size * sizeof(UInt));
-         VG_(memset)((*head)->mem_region_w, 0, (*head)->mem_region_size * sizeof(UInt));
-      }
-      else (*head)->mem_region_w = NULL;
-      if (clo_hm_read) {
-         (*head)->mem_region_r = VG_(malloc)("dh.new_block.5", (*head)->mem_region_size * sizeof(UInt));
-         VG_(memset)((*head)->mem_region_r, 0, (*head)->mem_region_size * sizeof(UInt));
-      }
-      else (*head)->mem_region_r = NULL;
-   }
+void init_hm_node(HeatMapNode** head, HeatMapNode** node, SizeT size, UInt ts_curr, Bool hm_enabled) {
+   tl_assert(size > 0);
+   if (!hm_enabled) return;
+   (*head) = VG_(malloc)("cd.new_block.3", sizeof(HeatMapNode));
+   (*head)->mem_region_size = size;
+   (*head)->mem_region = VG_(malloc)("cd.new_block.4", (*head)->mem_region_size * sizeof(UInt));
+   VG_(memset)((*head)->mem_region, 0, (*head)->mem_region_size * sizeof(UInt));
+
    (*head)->next = NULL;
-   (*head)->ts_w = 0;
-   (*head)->ts_r = 0;
+   (*head)->ts_id = ts_curr;
    *node = (*head);
 }
 
-void add_hm_node(HeatMap** node, UInt size) {
+void add_hm_node(HeatMapNode** node, UInt size, UInt ts_curr) {
    tl_assert((*node) != NULL);
-   HeatMap* new_node = VG_(malloc)("dh.new_block.3", sizeof(HeatMap));
+   tl_assert(size > 0);
+   HeatMapNode* new_node = VG_(malloc)("cd.new_block.3", sizeof(HeatMapNode));
    new_node->mem_region_size = size;
-   if (clo_hm_write) {
-      new_node->mem_region_w = VG_(malloc)("dh.new_block.4", new_node->mem_region_size * sizeof(UInt));
-      VG_(memset)(new_node->mem_region_w, 0, new_node->mem_region_size * sizeof(UInt));
-   }
-   else new_node->mem_region_w = NULL;
-   if (clo_hm_read) {
-      new_node->mem_region_r = VG_(malloc)("dh.new_block.5", new_node->mem_region_size * sizeof(UInt));
-      VG_(memset)(new_node->mem_region_r, 0, new_node->mem_region_size * sizeof(UInt));
-   }
-   else new_node->mem_region_r = NULL;
-   
-   
+   new_node->mem_region = VG_(malloc)("cd.new_block.4", new_node->mem_region_size * sizeof(UInt));
+   VG_(memset)(new_node->mem_region, 0, new_node->mem_region_size * sizeof(UInt));
+
    new_node->next = NULL;
-   new_node->ts_w = 0;
-   new_node->ts_r = 0;
+   new_node->ts_id = ts_curr;
    (*node)->next = new_node;
    (*node) = new_node;
 }
 
-void del_hm_list(HeatMap* head) {
-   HeatMap* next = head->next;
-   while (next != NULL) {
-      next = head->next;
-      if (head->mem_region_w != NULL) VG_(free)(head->mem_region_w);
-      if (head->mem_region_r != NULL) VG_(free)(head->mem_region_r);
-      VG_(free)(head);
-      head = next;
+void move_hm_list(HeatMapList** api_list, UInt *list_size, HeatMapNode* new_head, HeatMapNode* new_curr) {
+   
+   while ((*list_size) <= new_curr->ts_id) {
+      *list_size = (*list_size) * 2;
+      *api_list = VG_(realloc)("cd.HeatMapList.1", *api_list, sizeof(HeatMapList) * (*list_size));
+      VG_(memset)(((*api_list) + (*list_size)/2), 0, sizeof(HeatMapList) * (*list_size)/2);
    }
-}
-
-void move_hm_list(HeatMap** curr, HeatMap* new_head, HeatMap* new_curr) {
-   tl_assert((*curr)->next == NULL);
-   if (new_head != NULL) {
-      (*curr)->next = new_head;
-      (*curr) = new_curr;
+   while (new_head != NULL) {
+      if((*api_list)[new_head->ts_id].HMHead == NULL) {
+         (*api_list)[new_head->ts_id].HMHead = new_head;
+         (*api_list)[new_head->ts_id].HMNode = new_head;
+      }
+      else {
+         (*api_list)[new_head->ts_id].HMNode->next = new_head;
+         (*api_list)[new_head->ts_id].HMNode = new_head;
+      }
+      new_head = new_head->next;
    }
 }
 
@@ -336,12 +286,17 @@ static void intro_Block ( Block* bk )
    if (found) {
       api = (APInfo*)valW;
       tl_assert(keyW == (UWord)bk->ap);
-      // if (bk->HMHead == NULL && (bk->req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit)) { // TODO
-      if (bk->HMHead == NULL && bk->req_szB >= clo_hm_size_limit) {
-         init_hm_node(&(bk->HMHead), &(bk->HMNode), bk->req_szB);
+
+      // set up heap heatmap list
+      bk->HMR.HMHead = NULL; bk->HMR.HMNode = NULL;
+      bk->HMW.HMHead = NULL; bk->HMW.HMNode = NULL;
+      if (bk->req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) {
+         init_hm_node(&(bk->HMR.HMHead), &(bk->HMR.HMNode), (bk->req_szB/clo_memr_res + 1), api->ts_id_r, clo_hm_read);
+         init_hm_node(&(bk->HMW.HMHead), &(bk->HMW.HMNode), (bk->req_szB/clo_memw_res + 1), api->ts_id_w, clo_hm_write);
       }
+
    } else {
-      api = VG_(malloc)( "dh.intro_Block.1", sizeof(APInfo) );
+      api = VG_(malloc)( "cd.intro_Block.1", sizeof(APInfo) );
       VG_(memset)(api, 0, sizeof(*api));
       api->ap = bk->ap;
       Bool present = VG_(addToFM)( apinfo,
@@ -354,8 +309,23 @@ static void intro_Block ( Block* bk )
       if (0) VG_(printf)("api %p   -->  Unknown\n", api);
 
       // heap heatmap
-      api->HMHead = NULL; api->HMNode = NULL;
-      init_hm_node(&(api->HMHead), &(api->HMNode), 0);
+      api->HMWList = VG_(malloc)("cd.HeatMapList.1", sizeof(HeatMapList) * HEATMAPLIST_INIT_SIZE);
+      api->HMWListSize = HEATMAPLIST_INIT_SIZE;
+      VG_(memset)(api->HMWList, 0, sizeof(HeatMapList)*api->HMWListSize);
+      api->HMRList = VG_(malloc)("cd.HeatMapList.1", sizeof(HeatMapList) * HEATMAPLIST_INIT_SIZE);
+      api->HMRListSize = HEATMAPLIST_INIT_SIZE;
+      VG_(memset)(api->HMRList, 0, sizeof(HeatMapList)*api->HMRListSize);
+      api->ts_id_r = 0;
+      api->ts_id_w = 0;
+      api->ts_r = 0;
+      api->ts_w = 0;
+
+      bk->HMR.HMHead = NULL; bk->HMR.HMNode = NULL;
+      bk->HMW.HMHead = NULL; bk->HMW.HMNode = NULL;
+      if (bk->req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) {
+         init_hm_node(&(bk->HMR.HMHead), &(bk->HMR.HMNode), (bk->req_szB/clo_memr_res + 1), api->ts_id_r, clo_hm_read);
+         init_hm_node(&(bk->HMW.HMHead), &(bk->HMW.HMNode), (bk->req_szB/clo_memw_res + 1), api->ts_id_w, clo_hm_write);
+      }
    }
 
    tl_assert(api->ap == bk->ap);
@@ -454,7 +424,7 @@ static void retire_Block ( Block* bk, Bool because_freed )
          if (0) VG_(printf)("api %p   -->  Exactly(%lu)\n", api, api->xsize);
          // and allocate the histo
          if (bk->histoW) {
-            api->histo = VG_(malloc)("dh.retire_Block.1",
+            api->histo = VG_(malloc)("cd.retire_Block.1",
                                      api->xsize * sizeof(UInt));
             VG_(memset)(api->histo, 0, api->xsize * sizeof(UInt));
          }
@@ -498,10 +468,15 @@ static void retire_Block ( Block* bk, Bool because_freed )
    }
 
    // Heap heatmap list
-   if(bk->HMHead != NULL) {
-      move_hm_list(&(api->HMNode), bk->HMHead, bk->HMNode);
-      //VG_(printf)("api HMHead %p, bk head %p, bk end %p\n", api->HMHead, bk->HMHead, bk->HMNode);
+   if(bk->HMW.HMHead != NULL) {
+      move_hm_list(&(api->HMWList), &(api->HMWListSize), bk->HMW.HMHead, bk->HMW.HMNode);
+      //VG_(printf)("api HMHead %p, bk head %p, bk end %p\n", api->HMW.HMHead, bk->HMW.HMHead, bk->HMNode);
    }
+   if(bk->HMR.HMHead != NULL) {
+      move_hm_list(&(api->HMRList), &(api->HMRListSize), bk->HMR.HMHead, bk->HMR.HMNode);
+      //VG_(printf)("api HMHead %p, bk head %p, bk end %p\n", api->HMR.HMHead, bk->HMR.HMHead, bk->HMNode);
+   }
+
 
 #if 0
    if (bk->histoB) {
@@ -574,13 +549,21 @@ static void resize_Block(Block *bk, ExeContext* ec, SizeT old_req_szB, SizeT new
    }
 
    // update heatmap node info
-   if (bk->HMNode != NULL) {
-      add_hm_node(&(bk->HMNode), (new_req_szB/clo_mem_res + 1)); // add node with new req size
+   if (bk->HMW.HMNode != NULL) {
+      add_hm_node(&(bk->HMW.HMNode), (new_req_szB/clo_memw_res + 1), api->ts_id_w); // add node with new req size
    }
-   else { // in case realloc is called before HeatMap node is allocated
-      // if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) { // TODO
-      if (new_req_szB >= clo_hm_size_limit) {
-         init_hm_node(&(bk->HMHead), &(bk->HMNode), new_req_szB);
+   else { // in case realloc is called before HeatMapNode node is allocated
+      if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) { 
+         init_hm_node(&(bk->HMW.HMHead), &(bk->HMW.HMNode), (new_req_szB/clo_memw_res + 1), api->ts_id_w, clo_hm_read);
+      }
+   }
+
+   if (bk->HMR.HMNode != NULL) {
+      add_hm_node(&(bk->HMR.HMNode), (new_req_szB/clo_memr_res + 1), api->ts_id_r); // add node with new req size
+   }
+   else { // in case realloc is called before HeatMapNode node is allocated
+      if (new_req_szB >= clo_hm_size_limit || api->curr_bytes >= clo_hm_size_limit) { 
+         init_hm_node(&(bk->HMR.HMHead), &(bk->HMR.HMNode), (new_req_szB/clo_memr_res + 1), api->ts_id_r, clo_hm_write);
       }
    }
 }
@@ -616,7 +599,7 @@ void* new_block ( ThreadId tid, void* p, SizeT req_szB, SizeT req_alignB,
    }
 
    // Make new Block, add to interval_tree.
-   Block* bk = VG_(malloc)("dh.new_block.1", sizeof(Block));
+   Block* bk = VG_(malloc)("cd.new_block.1", sizeof(Block));
    bk->payload      = (Addr)p;
    bk->req_szB      = req_szB;
    bk->ap           = VG_(record_ExeContext)(tid, 0/*first word delta*/);
@@ -626,14 +609,8 @@ void* new_block ( ThreadId tid, void* p, SizeT req_szB, SizeT req_alignB,
    // set up histogram array, if the block isn't too large
    bk->histoW = NULL;
    if (req_szB <= HISTOGRAM_SIZE_LIMIT) {
-      bk->histoW = VG_(malloc)("dh.new_block.2", req_szB * sizeof(UShort));
+      bk->histoW = VG_(malloc)("cd.new_block.2", req_szB * sizeof(UShort));
       VG_(memset)(bk->histoW, 0, req_szB * sizeof(UShort));
-   }
-
-   // set up heap heatmap list
-   bk->HMHead = NULL; bk->HMNode = NULL;
-   if (req_szB >= clo_hm_size_limit) {
-      init_hm_node(&(bk->HMHead), &(bk->HMNode), req_szB);
    }
 
    Bool present = VG_(addToFM)( interval_tree, (UWord)bk, (UWord)0/*no val*/);
@@ -1842,7 +1819,7 @@ IRSB* cd_instrument ( VgCallbackClosure* closure,
                       const VexArchInfo* archinfo_host,
                       IRType gWordTy, IRType hWordTy )
 {
-   Int        i;
+   Int        i, n = 0;
    UInt       isize;
    IRStmt*    st;
    Addr       cia; /* address of current insn */
@@ -2092,6 +2069,12 @@ IRSB* cd_instrument ( VgCallbackClosure* closure,
             /* We may never reach the next statement, so need to flush
                all outstanding transactions now. */
             flushEvents( &gds );
+
+            if (n > 0) {
+               // Add an increment before the Exit statement, then reset 'n'.
+               add_counter_update(gds.sbOut, n);
+               n = 0;
+            }
             break;
          }
 
@@ -2108,6 +2091,11 @@ IRSB* cd_instrument ( VgCallbackClosure* closure,
          ppIRStmt(st);
          VG_(printf)("\n");
       }
+   }
+
+   if (n > 0) {
+      // Add an increment before the SB end.
+      add_counter_update(gds.sbOut, n);
    }
 
    /* Deal with branches to unknown destinations.  Except ignore ones
@@ -2412,7 +2400,7 @@ static const HChar* json_escape(const HChar* s)
    // necessary.
    SizeT newcap = len + extra + 1;
    if (bufcap < newcap) {
-      buf = VG_(realloc)("dh.json", buf, newcap);
+      buf = VG_(realloc)("cd.json", buf, newcap);
       bufcap = newcap;
    }
 
@@ -2469,7 +2457,7 @@ static void write_APInfo_frame(UInt n, DiEpoch ep, Addr ip, void* opaque)
          frame_n = valW;
       } else {
          // `buf` is a static buffer, we must copy it.
-         const HChar* str = VG_(strdup)("dh.frame_tbl.3", buf);
+         const HChar* str = VG_(strdup)("cd.frame_tbl.3", buf);
          frame_n = next_frame_n++;
          Bool present = VG_(addToFM)(frame_tbl, (UWord)str, frame_n);
          tl_assert(!present);
@@ -2509,13 +2497,13 @@ static void write_APInfo_frameW(UInt n, DiEpoch ep, Addr ip, void* opaque)
          frame_n = valW;
       } else {
          // `buf` is a static buffer, we must copy it.
-         const HChar* str = VG_(strdup)("dh.frame_tbl.3", buf);
+         const HChar* str = VG_(strdup)("cd.frame_tbl.3", buf);
          frame_n = next_frame_n++;
          Bool present = VG_(addToFM)(frame_tbl, (UWord)str, frame_n);
          tl_assert(!present);
       }
 
-      if (clo_hm_write) FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
+      FHHW("%c%lu", *is_first ? '[' : ',', frame_n);
       *is_first = False;
 
    } while (VG_(next_IIPC)(iipc));
@@ -2549,13 +2537,13 @@ static void write_APInfo_frameR(UInt n, DiEpoch ep, Addr ip, void* opaque)
          frame_n = valW;
       } else {
          // `buf` is a static buffer, we must copy it.
-         const HChar* str = VG_(strdup)("dh.frame_tbl.3", buf);
+         const HChar* str = VG_(strdup)("cd.frame_tbl.3", buf);
          frame_n = next_frame_n++;
          Bool present = VG_(addToFM)(frame_tbl, (UWord)str, frame_n);
          tl_assert(!present);
       }
 
-      if (clo_hm_read) FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
+      FHHR("%c%lu", *is_first ? '[' : ',', frame_n);
       *is_first = False;
 
    } while (VG_(next_IIPC)(iipc));
@@ -2646,37 +2634,49 @@ static void write_APInfos(void)
    FP(" ]\n");
 }
 
-
-static void write_AP_HM(APInfo* api, Bool is_first)
+static void write_AP_HMW(APInfo* api, Bool is_first)
 {
    tl_assert(api->total_blocks >= api->max_blocks);
    tl_assert(api->total_bytes >= api->max_bytes);
 
-   if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) {
-      FHHW("w_fs: ");
-      Bool is_first_frame = True;
-      VG_(apply_ExeContext)(write_APInfo_frameW, &is_first_frame, api->ap);
-      FHHW("]\n");
-   }
+   FHHW("w_fs: ");
+   Bool is_first_frame = True;
+   VG_(apply_ExeContext)(write_APInfo_frameW, &is_first_frame, api->ap);
+   FHHW("]\n");
 
-   if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) {
-      FHHR("r_fs: ");
-      Bool is_first_frame = True;
-      VG_(apply_ExeContext)(write_APInfo_frameR, &is_first_frame, api->ap);
-      FHHR("]\n");
-   }
-
-   HeatMap* hm_node = api->HMHead->next; // dummy head for api
-
-   while(hm_node != NULL) {
-      for (UInt i = 0; i < hm_node->mem_region_size; i++) {
-         if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) FHHW("%d\t", hm_node->mem_region_w[i]);
-         if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) FHHR("%d\t", hm_node->mem_region_r[i]);
+   for (UInt k = 0; k < api->ts_id_w; k++) {
+      HeatMapNode* hm_node = (api->HMWList)[k].HMHead;
+      while(hm_node != NULL) {
+         for (UInt i = 0; i < hm_node->mem_region_size; i++) {
+            FHHW("%d\t", hm_node->mem_region[i]);
+         }
+         //VG_(printf)("print head %p, hm_node %p\n", (api->HMWList)[k].HMHead, hm_node);
+         hm_node = hm_node->next;
       }
-      if (clo_hm_write && api->writes_bytes >= clo_hm_writes_limit) FHHW("\n");
-      if (clo_hm_read && api->reads_bytes >= clo_hm_reads_limit) FHHR("\n");
-      //VG_(printf)("print head %p, hm_node %p\n", api->HMHead, hm_node);
-      hm_node = hm_node->next;
+      FHHW("\n");
+   }
+}
+
+static void write_AP_HMR(APInfo* api, Bool is_first)
+{
+   tl_assert(api->total_blocks >= api->max_blocks);
+   tl_assert(api->total_bytes >= api->max_bytes);
+
+   FHHR("r_fs: ");
+   Bool is_first_frame = True;
+   VG_(apply_ExeContext)(write_APInfo_frameR, &is_first_frame, api->ap);
+   FHHR("]\n");
+
+   for (UInt k = 0; k < api->ts_id_r; k++) {
+      HeatMapNode* hm_node = (api->HMRList)[k].HMHead;
+      while(hm_node != NULL) {
+         for (UInt i = 0; i < hm_node->mem_region_size; i++) {
+            FHHR("%d\t", hm_node->mem_region[i]);
+         }
+         //VG_(printf)("print head %p, hm_node %p\n", (api->HMRList)[k].HMHead, hm_node);
+         hm_node = hm_node->next;
+      }
+      FHHR("\n");
    }
 }
 
@@ -2684,12 +2684,12 @@ static void write_AP_HMs(void)
 {
    UWord keyW, valW;
 
-   if (clo_hm_write) FHHW("ts-res: %d\n", clo_ts_res);
-   if (clo_hm_write) FHHW("mem-res: %d\n", clo_mem_res);
+   if (clo_hm_write) FHHW("ts-write-res: %d\n", clo_tsw_res);
+   if (clo_hm_write) FHHW("mem-write-res: %d\n", clo_memw_res);
    if (clo_hm_write) FHHW("hm-size-limit: %d\n", clo_hm_size_limit);
 
-   if (clo_hm_read) FHHR("ts-res: %d\n", clo_ts_res);
-   if (clo_hm_read) FHHR("mem-res: %d\n", clo_mem_res);
+   if (clo_hm_read) FHHR("ts-read-res: %d\n", clo_tsr_res);
+   if (clo_hm_read) FHHR("mem-write-res: %d\n", clo_memr_res);
    if (clo_hm_read) FHHR("hm-size-limit: %d\n", clo_hm_size_limit);
 
    VG_(initIterFM)(apinfo);
@@ -2697,8 +2697,13 @@ static void write_AP_HMs(void)
    while (VG_(nextIterFM)(apinfo, &keyW, &valW)) {
       APInfo* api = (APInfo*)valW;
       tl_assert(api && api->ap == (ExeContext*)keyW);
-      if(api->HMHead != api->HMNode) {
-         write_AP_HM(api, is_first);
+
+      if(clo_hm_write && api->ts_id_w >= TS_PRINT_THRS && api->writes_bytes >= clo_hm_writes_limit) {
+         write_AP_HMW(api, is_first);
+         is_first = False;
+      }
+      if(clo_hm_read && api->ts_id_r >= TS_PRINT_THRS && api->reads_bytes >= clo_hm_reads_limit) {
+         write_AP_HMR(api, is_first);
          is_first = False;
       }
    }
@@ -2887,10 +2892,10 @@ static void cd_fini(Int exitcode)
 
    // Create the frame table, and insert the special "[root]" node at index 0.
    frame_tbl = VG_(newFM)(VG_(malloc),
-                          "dh.frame_tbl.1",
+                          "cd.frame_tbl.1",
                           VG_(free),
                           frame_cmp);
-   const HChar* root = VG_(strdup)("dh.frame_tbl.2", "[root]");
+   const HChar* root = VG_(strdup)("cd.frame_tbl.2", "[root]");
    Bool present = VG_(addToFM)(frame_tbl, (UWord)root, 0);
    tl_assert(!present);
    next_frame_n = 1;
@@ -2964,7 +2969,7 @@ static void cd_fini(Int exitcode)
    // print that.
    UWord n_frames = next_frame_n;
    const HChar** frames =
-      VG_(malloc)("dh.frames", n_frames * sizeof(const HChar*));
+      VG_(malloc)("cd.frames", n_frames * sizeof(const HChar*));
    VG_(initIterFM)(frame_tbl);
    while (VG_(nextIterFM)(frame_tbl, &keyW, &valW)) {
       const HChar* str = (const HChar*)keyW;
@@ -3052,8 +3057,10 @@ static Bool cd_process_cmd_line_option(const HChar* arg)
    else if VG_BOOL_CLO(arg, "--branch-sim", clo_branch_sim) {}
    else if VG_BOOL_CLO(arg, "--hm-read", clo_hm_read) {}
    else if VG_BOOL_CLO(arg, "--hm-write", clo_hm_write) {}
-   else if VG_INT_CLO(arg, "--ts-res", clo_ts_res) {}
-   else if VG_INT_CLO(arg, "--mem-res", clo_mem_res) {}
+   else if VG_INT_CLO(arg, "--ts-read-res", clo_tsr_res) {}
+   else if VG_INT_CLO(arg, "--ts-write-res", clo_tsw_res) {}
+   else if VG_INT_CLO(arg, "--mem-read-res", clo_memr_res) {}
+   else if VG_INT_CLO(arg, "--mem-write-res", clo_memw_res) {}
    else if VG_INT_CLO(arg, "--hm-size-limit", clo_hm_size_limit) {}
    else if VG_INT_CLO(arg, "--hm-writes-limit", clo_hm_writes_limit) {}
    else if VG_INT_CLO(arg, "--hm-reads-limit", clo_hm_reads_limit) {}
@@ -3125,12 +3132,12 @@ static void cd_pre_clo_init(void)
                                    dh_malloc_usable_size,
                                    0 );
    interval_tree = VG_(newFM)( VG_(malloc),
-                               "dh.interval_tree.1",
+                               "cd.interval_tree.1",
                                VG_(free),
                                interval_tree_Cmp );
 
    apinfo = VG_(newFM)( VG_(malloc),
-                        "dh.apinfo.1",
+                        "cd.apinfo.1",
                         VG_(free),
                         NULL/*unboxedcmp*/ );
 }

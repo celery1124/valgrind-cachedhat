@@ -26,8 +26,10 @@ Heap profile is saved in heapProfile.out.pid in the run directory. You can analy
 Heap profile heatmap has several parameters to control.  
 
 ```
---ts-res controls the time resolution (here time is actual count of memory reference rather than real processor cycles).  
---mem-res controls the memory resolution, finer granularity requires more space to store the heatmap. 
+--ts-read-res controls the time resolution (here time is actual count of memory reference rather than real processor cycles) for read requests heatmap. 
+--ts-write-res controls the time resolution (here time is actual count of memory reference rather than real processor cycles) for write requests heatmap.  
+--mem-read-res controls the memory resolution for read reqeusts profile, finer granularity requires more space to store the heatmap. 
+--mem-write-res controls the memory resolution for write reqeusts profile, finer granularity requires more space to store the heatmap. 
 --hm-read=(**yes**/no) controls whether record the read requests heatmaps.
 --hm-write=(yes/**no**) controls whether record the write requests heatmaps.
 --hm-size-limit controls the heap region size limit to record for heatmap. (Better set this as same as the LLC size). 
