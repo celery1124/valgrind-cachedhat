@@ -256,15 +256,18 @@ void move_hm_list(HeatMapList** api_list, UInt *list_size, HeatMapNode* new_head
       VG_(memset)(((*api_list) + (*list_size)/2), 0, sizeof(HeatMapList) * (*list_size)/2);
    }
    while (new_head != NULL) {
+      HeatMapNode* next_node = new_head->next;
       if((*api_list)[new_head->ts_id].HMHead == NULL) {
          (*api_list)[new_head->ts_id].HMHead = new_head;
          (*api_list)[new_head->ts_id].HMNode = new_head;
+         (*api_list)[new_head->ts_id].HMNode->next = NULL;
       }
       else {
          (*api_list)[new_head->ts_id].HMNode->next = new_head;
          (*api_list)[new_head->ts_id].HMNode = new_head;
+         (*api_list)[new_head->ts_id].HMNode->next = NULL;
       }
-      new_head = new_head->next;
+      new_head = next_node;
    }
 }
 
