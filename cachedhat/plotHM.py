@@ -21,7 +21,7 @@ def main():
         if exc.errno != errno.EEXIST:
             raise
         pass
-    ometaF = open(outFolder+"/meta.txt", "w")
+    ometaF = open(outFolder+"/meta.txt", "a")
 
     mat = None
     mat_name = None
