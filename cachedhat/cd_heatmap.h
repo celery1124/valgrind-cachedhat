@@ -12,7 +12,7 @@
 #define MEMW_RES                 16384
 
 #define HEATMAPLIST_INIT_SIZE    16
-#define TS_PRINT_THRS            16
+#define TS_PRINT_THRS            64
 
 struct HeatMapNode;
 typedef 
