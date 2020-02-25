@@ -139,12 +139,12 @@ inline void heap_handle_write ( Addr addr, UWord szB )
          if (bk->HMW.HMNode->ts_id != api->ts_id_w) {
             add_hm_node(&(bk->HMW.HMNode), bk->HMW.HMNode->mem_region_size, api->ts_id_w);
          }
-         bk->HMW.HMNode->mem_region[(addr-bk->payload)/clo_memw_res]++;
          if(++(api->ts_w) == clo_tsw_res) {
             api->ts_w = 0;
             api->ts_id_w++;
             add_hm_node(&(bk->HMW.HMNode), bk->HMW.HMNode->mem_region_size, api->ts_id_w);
          }
+         bk->HMW.HMNode->mem_region[(addr-bk->payload)/clo_memw_res]++;
       }
    }
 }
@@ -165,12 +165,12 @@ inline void heap_handle_read ( Addr addr, UWord szB )
          if (bk->HMR.HMNode->ts_id != api->ts_id_r) {
             add_hm_node(&(bk->HMR.HMNode), bk->HMR.HMNode->mem_region_size, api->ts_id_r);
          }
-         bk->HMR.HMNode->mem_region[(addr-bk->payload)/clo_memr_res]++;
          if(++(api->ts_r) == clo_tsr_res) {
             api->ts_r = 0;
             api->ts_id_r++;
             add_hm_node(&(bk->HMR.HMNode), bk->HMR.HMNode->mem_region_size, api->ts_id_r);
          }
+         bk->HMR.HMNode->mem_region[(addr-bk->payload)/clo_memr_res]++;
       }
    }
 }

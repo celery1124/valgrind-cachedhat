@@ -57,6 +57,7 @@ def main():
             else:
                 col = (line.strip('\t\n').replace("\t"," "))
                 col = list(map(int, col.split()))
+                col = np.trim_zeros(col, 'b')
                 col = np.ndarray((1,len(col)), buffer=np.array(col))
                 if mat is None:
                     mat = col
